@@ -12,9 +12,9 @@ import {
   onSnapshot,
   orderBy,
   serverTimestamp,
-  // Hapus Timestamp dari impor ini karena tidak digunakan
 } from 'firebase/firestore';
-import { Content } from '@google-cloud/vertexai';
+// PERBAIKAN: Impor 'Content' dari file tipe data lokal kita
+import { Content } from '@/types/gemini'; 
 import { Send } from 'lucide-react';
 import AiMessage from './AiMessage';
 
@@ -134,9 +134,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      // Cara yang lebih aman untuk memicu submit dari textarea
       if (e.currentTarget.form) {
-        // Memicu event submit pada form
         e.currentTarget.form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
       }
     }
@@ -144,14 +142,12 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
 
   const lastAiMessageIndex = messages.findLastIndex(msg => msg.sender === 'ai');
 
-
   return (
     <div className="flex flex-col h-full bg-[#121212] rounded-lg border border-gray-800">
       <div className="p-4 border-b border-gray-800 flex-shrink-0">
         <h2 className="font-bold text-lg">Mentor AI</h2>
         <p className="text-xs text-green-400">Online</p>
       </div>
-
       <div className="flex-1 p-4 overflow-y-auto">
         {messages.map((msg, index) => (
           <div
@@ -182,7 +178,6 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
         )}
         <div ref={messagesEndRef} />
       </div>
-
       <div className="p-4 border-t border-gray-800 flex-shrink-0">
         <form onSubmit={handleSendMessage} className="flex items-end space-x-3">
           <textarea
