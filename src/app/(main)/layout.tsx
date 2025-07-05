@@ -4,11 +4,6 @@ import BottomNav from '@/components/BottomNav';
 import { Toaster } from 'react-hot-toast';
 import { AnimatePresence, motion } from 'framer-motion';
 import { usePathname } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';
-import OnboardingModal from '@/components/OnboardingModal'; // 1. Impor OnboardingModal
-import { useState, useEffect } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 
 export default function MainLayout({
   children,
@@ -16,24 +11,6 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { user } = useAuth(); // Kita hanya butuh 'user' di sini
-  const [showOnboarding, setShowOnboarding] = useState(false);
-
-  // 2. useEffect untuk mengecek status onboarding pengguna
-  useEffect(() => {
-    if (user) {
-      const profileRef = doc(db, 'users', user.uid);
-      const unsubscribe = onSnapshot(profileRef, (docSnap) => {
-        // Tampilkan modal jika field 'hasCompletedOnboarding' tidak ada atau bernilai false
-        if (!docSnap.exists() || docSnap.data().hasCompletedOnboarding === false) {
-          setShowOnboarding(true);
-        } else {
-          setShowOnboarding(false);
-        }
-      });
-      return () => unsubscribe();
-    }
-  }, [user]);
 
   return (
     <div className="h-screen bg-[#0A0A0A] flex flex-col">
@@ -47,11 +24,6 @@ export default function MainLayout({
         }}
       />
       
-      {/* 3. Tampilkan modal sebagai overlay jika diperlukan */}
-      <AnimatePresence>
-        {showOnboarding && <OnboardingModal />}
-      </AnimatePresence>
-
       <AnimatePresence mode="wait">
         <motion.main
           key={pathname}
