@@ -1,32 +1,48 @@
 'use client';
 
-// Hapus Link, ArrowRight, dan Lock karena tidak digunakan di sini
+import Link from 'next/link';
+import { ArrowRight, Lock } from 'lucide-react';
+
 interface MissionCardProps {
   title: string;
   description: string;
   status: 'active' | 'completed' | 'locked';
-  // Hapus prop 'href' karena tidak digunakan
+  href: string; // <-- Prop 'href' dikembalikan
 }
 
-export default function MissionCard({ title, description, status }: MissionCardProps) {
+export default function MissionCard({ title, description, status, href }: MissionCardProps) {
+  const isLocked = status === 'locked';
   const isCompleted = status === 'completed';
 
-  const statusStyles = {
-    active: 'border-l-4 border-l-[#A8FF00]',
-    completed: 'border-l-4 border-l-gray-500 opacity-60',
-    locked: 'border-l-4 border-l-red-500',
-  };
-
-  return (
-    <div className="flex-grow">
-      <div className={statusStyles[status]}>
-        <div className="pl-4">
-          <h3 className={`font-bold ${isCompleted ? 'line-through text-gray-400' : 'text-white'}`}>
-            {title}
-          </h3>
-          <p className="text-xs text-gray-400 mt-1">{description}</p>
+  const cardContent = (
+    <>
+      <div className="flex-grow">
+        <div className={`border-l-4 ${isCompleted ? 'border-l-gray-500' : 'border-l-[#A8FF00]'}`}>
+          <div className="pl-4">
+            <h3 className={`font-bold ${isCompleted ? 'line-through text-gray-400' : 'text-white'}`}>
+              {title}
+            </h3>
+            <p className="text-xs text-gray-400 mt-1">{description}</p>
+          </div>
         </div>
       </div>
-    </div>
+      <div className="flex-shrink-0">
+        {isLocked ? <Lock size={20} className="text-red-500" /> : <ArrowRight size={20} />}
+      </div>
+    </>
+  );
+
+  if (isLocked || href === '#') {
+    return (
+      <div className={`flex justify-between items-center w-full ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+        {cardContent}
+      </div>
+    );
+  }
+
+  return (
+    <Link href={href} className="flex justify-between items-center w-full">
+      {cardContent}
+    </Link>
   );
 }
