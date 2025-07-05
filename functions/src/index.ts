@@ -456,7 +456,7 @@ export const askMentorAI = onCall(async (request) => {
     logger.error("!!! ERROR CALLING GEMINI API:", JSON.stringify(error, null, 2));
     return { response: `Error dari Google API: ${error.message}.` };
   }
-})
+});
 
 // Fungsi untuk menambah transaksi dan memberi XP
 export const addTransaction = onCall(async (request) => { 
