@@ -1,8 +1,10 @@
+// src/components/ChatInterface.tsx
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
-import { getFunctions, httpsCallable, HttpsCallableResult } from 'firebase/functions';
+import Button from './Button';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
 import {
   getFirestore,
@@ -12,9 +14,9 @@ import {
   onSnapshot,
   orderBy,
   serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore';
-// PERBAIKAN: Impor 'Content' dari file tipe data lokal kita
-import { Content } from '@/types/gemini'; 
+import { Content } from '@/types/gemini'; // Menggunakan tipe lokal
 import { Send } from 'lucide-react';
 import AiMessage from './AiMessage';
 
@@ -22,10 +24,6 @@ type Message = {
   text: string;
   sender: 'user' | 'ai';
 };
-
-interface CloudFunctionResponse {
-  response: string;
-}
 
 type ChatInterfaceProps = {
   user: User;
@@ -38,6 +36,9 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const [isAiTyping, setIsAiTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  
+  // 1. State baru untuk melacak apakah ini pemuatan awal
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const db = getFirestore(app);
 
@@ -48,12 +49,10 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     const q = query(chatHistoryColRef, orderBy('createdAt', 'asc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      // 2. PERBAIKAN PESAN SELAMAT DATANG
       if (snapshot.empty) {
-        setIsAiTyping(true);
-        setTimeout(() => {
-          setMessages([{ text: `Selamat datang di Fintack, ${user.displayName || 'Pilot'}. Siap serang?`, sender: 'ai' }]);
-          setIsAiTyping(false);
-        }, 1000);
+        setMessages([{ text: `Selamat datang di Fintack, ${user.displayName || 'Pilot'}. Apa masalah keuangan terbesar lo sekarang? Langsung ke intinya! 🔥`, sender: 'ai' }]);
+        setIsInitialLoad(false); // Tetap matikan initial load
         return;
       }
 
@@ -70,6 +69,9 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
           parts: msg.parts,
       }));
       setGeminiHistory(apiHistory);
+      
+      // 3. Setelah riwayat dimuat, matikan status pemuatan awal
+      setIsInitialLoad(false);
     });
 
     return () => unsubscribe();
@@ -104,14 +106,14 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
 
     try {
       const functions = getFunctions();
-      const askMentorAI = httpsCallable< { prompt: string; history: Content[] }, CloudFunctionResponse >(functions, 'askMentorAI');
+      const askMentorAI = httpsCallable(functions, 'askMentorAI');
       
-      const result: HttpsCallableResult<CloudFunctionResponse> = await askMentorAI({
+      const result = await askMentorAI({
         prompt: userMessageText,
         history: geminiHistory,
       });
 
-      const aiResponseText = result.data.response;
+      const aiResponseText = (result.data as any).response;
 
       await addDoc(collection(db, 'users', user.uid, 'chatHistory'), {
         role: 'model',
@@ -134,12 +136,11 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (e.currentTarget.form) {
-        e.currentTarget.form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-      }
+      handleSendMessage(e as any);
     }
   };
 
+  // Cari indeks dari pesan AI yang terakhir
   const lastAiMessageIndex = messages.findLastIndex(msg => msg.sender === 'ai');
 
   return (
@@ -148,6 +149,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
         <h2 className="font-bold text-lg">Mentor AI</h2>
         <p className="text-xs text-green-400">Online</p>
       </div>
+
       <div className="flex-1 p-4 overflow-y-auto">
         {messages.map((msg, index) => (
           <div
@@ -162,7 +164,9 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
               }`}
             >
               {msg.sender === 'ai' ? (
-                <AiMessage text={msg.text} isStreaming={index === lastAiMessageIndex} />
+                // 4. PERBAIKAN LOGIKA STREAMING
+                // Animasi hanya berjalan jika ini adalah pesan terakhir DAN bukan pemuatan awal
+                <AiMessage text={msg.text} isStreaming={index === lastAiMessageIndex && !isInitialLoad} />
               ) : (
                 <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
               )}
@@ -178,6 +182,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
         )}
         <div ref={messagesEndRef} />
       </div>
+
       <div className="p-4 border-t border-gray-800 flex-shrink-0">
         <form onSubmit={handleSendMessage} className="flex items-end space-x-3">
           <textarea

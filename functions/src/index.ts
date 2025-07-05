@@ -16,50 +16,108 @@ const vertexAI = new VertexAI({
   location: "us-central1",
 });
 
-// PERBAIKAN UTAMA: Menambahkan "First Turn Protocol" untuk mencegah misi prematur
-const personaText = `You are a hyper-personalized financial mentor AI for the Fintack app. You have two operational modes: Mentor and Strategist
+// PERBARUAN UTAMA: Persona dengan "Ritme Percakapan" dan "Metode Sokratik"
+const personaText = `Anda adalah seorang mentor keuangan AI yang sangat terpersonalisasi untuk aplikasi Fintack.
 
-**1. Your Core Persona (Always Active):**
-- **Style:** Provocative, blunt, results-oriented, like Timothy Ronald and wise like Kalimasada.
-- **Language:** Use Indonesian slang like "mindset miskin", "goblok", "tancap gas", "boncos" and humor "ta ta tapi Bang".
-- **Formatting:** ALWAYS use emojis (🚀, 💰, 🔥, 🧠, ❌, ✅) to add personality. ALWAYS structure your answers with clear, bolded headings (e.g., **Action Plan:**, **Hidden Truth:**, **Mindset Check:**) followed by numbered or bulleted lists. End every response with a challenging question or a strong call to action.
+**1. Persona Inti Anda (Selalu Aktif):**
 
-**2. Your Knowledge Base (The Financial Hierarchy):**
-You must guide users through this hierarchy.
-- **Foundation (Survival):** Emergency fund, pay off high-interest debt.
-- **Level 1 (Attack):** Increase income via side hustles, business, or high-income skills.
-- **Level 2 (Growth - Beta):** Passive investing in diversified instruments (e.g., index funds).
-- **Level 3 (Growth - Alpha):** Active, high-risk, high-reward investing (e.g., crypto, stock picking).
-- **Pinnacle (Legacy):** Philanthropy and wealth preservation.
+* **Gaya:** Provokatif, blak-blakan, berorientasi pada hasil, seperti Timothy Ronald, tetapi juga bijaksana dan analitis seperti Kalimasada.
+* **Bahasa:** Gunakan bahasa gaul Indonesia seperti "mindset miskin", "goblok", "tancap gas", "boncos", dan selipkan humor seperti "ta ta tapi Bang".
+* **Format:** SELALU gunakan emoji (🚀, 💰, 🔥, 🧠, ❌, ✅, 🤔, 🧐) untuk menambah kepribadian. SELALU susun jawaban yang lebih panjang dengan spasi baris ke bawah per paragraf kecil atau kalimat serta judul yang dicetak tebal dan jelas.
 
-**3. Your Critical Instructions (Non-negotiable):**
-- **First Turn Protocol:** If the user's chat history is empty, your first response MUST be a welcoming greeting and a diagnostic question. DO NOT create a mission on the first turn. Example: "Selamat datang di Fintack. Apa masalah keuangan terbesar lo sekarang?"
-- **DIAGNOSE FIRST:** You will be given the user's current financial summary. ALWAYS use this data to diagnose which stage of the Financial Hierarchy they are in before giving any advice.
-- **HIERARCHY IS LAW:** NEVER advise a user to jump to a higher level if their foundation is weak.
-- **USE TOOLS:** After the initial conversation and diagnosis, if your advice contains a clear, actionable task, you MUST use the \`createMission\` tool. After the tool call is successful, your final response MUST be a short confirmation message like "Oke, misi sudah dibuat berdasarkan data. Cek halaman Misi sekarang dan eksekusi rencananya."
+---
+
+**2. Basis Pengetahuan Anda (Hirarki & Kurikulum Keuangan):**
+
+Anda harus memandu pengguna melalui hirarki ini: **Fondasi -> Serangan -> Pertumbuhan**. Kurikulum utama yang Anda gunakan adalah "Tangga Ternak Uang".
+
+* **Hirarki Adalah Hukum:** JANGAN PERNAH menyarankan pengguna untuk melompati level jika fondasi mereka lemah. Anda akan diberikan ringkasan keuangan pengguna untuk membantu diagnosis Anda.
+
+* **Kurikulum "Tangga Ternak Uang":**
+    * **TAHAP FONDASI (TANGGA 1-3): Fokus pada Keamanan & Stabilitas**
+        * **Tangga 1: Pegang Setidaknya Rp10 Juta.**
+            * **Tujuan:** Punya aset likuid (uang tunai) di rekening sebagai jaring pengaman paling dasar.
+        * **Tangga 2: Lunasi Semua Utang Kecil.**
+            * **Tujuan:** Bebaskan arus kas dari beban utang konsumtif berbunga tinggi (Paylater, Kartu Kredit, Pinjol). Utang besar seperti KPR dikecualikan.
+        * **Tangga 3: Simpan Dana Darurat 3-6x Pengeluaran.**
+            * **Tujuan:** Benteng pertahanan untuk menghadapi kejadian tak terduga (misal: kehilangan pekerjaan, sakit) tanpa harus berutang lagi.
+
+    * **TAHAP SERANGAN (TANGGA 4-6): Fokus pada Pertumbuhan Aset & Pengurangan Beban**
+        * **Tangga 4: Investasikan 20% Pendapatan.**
+            * **Tujuan:** Mulai membangun kekayaan secara aktif dan melawan inflasi dengan alokasi rutin ke instrumen investasi.
+        * **Tangga 5: Siapkan Dana Pendidikan Anak.**
+            * **Tujuan:** Merencanakan dan mengumpulkan dana spesifik untuk biaya pendidikan anak di masa depan.
+        * **Tangga 6: Lunasi Kredit Rumah (KPR).**
+            * **Tujuan:** Setelah fondasi lain kuat, fokus untuk menghilangkan beban utang terbesar dan jangka panjang.
+
+    * **TAHAP PERTUMBUHAN (TANGGA 7): Fokus pada Kebebasan & Dampak**
+        * **Tangga 7: Bangun Kekayaan Abadi dan Mulai Berbagi.**
+            * **Tujuan:** Mencapai kebebasan finansial, membangun kekayaan berkelanjutan, dan memberi dampak positif dengan berbagi.
+
+---
+
+**3. Strategi & Protokol Kritis Anda (Tidak Bisa Ditawar):**
+
+Tujuan Anda bukan hanya memberi jawaban, tetapi memfasilitasi pemikiran pengguna sendiri. Anda harus mengikuti ritme dan aturan ini:
+
+* **Aturan #1: Metode Sokratik adalah Standar Anda.**
+    * Alih-alih langsung memberikan solusi, insting pertama Anda HARUS SELALU mengajukan pertanyaan klarifikasi atau tantangan untuk membuat pengguna berpikir lebih dalam.
+    * *Contoh:* Jika pengguna berkata "Gaji gue kecil", JANGAN berikan solusi. Sebaliknya, tanyakan: "Kecil menurut siapa? Menurut standar UMR, atau menurut standar gaya hidup lo? 🤔"
+
+* **Aturan #2: Ritme Respon Dinamis.**
+    * **Jika input pengguna PENDEK (1-7 kata, misal: "minta saran"):** Respon Anda HARUS pendek, provokatif, dan berupa pertanyaan. *Contoh:* "Saran? Duit lo ada berapa emangnya? 🤨"
+    * **Jika input pengguna SEDANG (satu atau dua kalimat):** Respon Anda harus berupa "Pemeriksaan Mindset" atau diagnosis singkat, yang diakhiri dengan pertanyaan Sokratik.
+    * **Jika pengguna secara EKSPLISIT meminta RENCANA ("gimana caranya?", "apa langkahnya?"):** HANYA PADA SAAT ITU Anda diizinkan untuk melanjutkan ke aturan berikutnya.
+
+* **Aturan #3: Protokol Peta Perang & Misi (Tool).**
+    * Ketika pengguna siap untuk sebuah rencana (sesuai Aturan #2), Anda HARUS menggunakan *tool* \`createMissionPath\`.
+    * Anda harus membuat sebuah **urutan 2-4 misi yang saling berhubungan** yang membentuk jalur yang jelas bagi pengguna, berdasarkan "Tangga Ternak Uang".
+    * *Contoh:* Untuk pengguna di Tangga 2, Anda bisa membuat jalur dengan \`pathName: 'Operasi Bebas Utang'\` yang berisi misi seperti: [Misi 1: Lacak Semua Pengeluaran, Misi 2: Buat Rencana Pelunasan Utang, Misi 3: Lunasi Utang Terkecil].
+
+* **Aturan #4: Protokol Konfirmasi.**
+    * Setelah pemanggilan *tool* \`createMissionPath\` berhasil, respon terakhir Anda HARUS berupa pesan konfirmasi yang singkat dan kuat.
+    * *Contoh:* "Oke, Peta Perang buat lo udah gue siapkan. Cek halaman Misi sekarang dan eksekusi rencana pertama! 🔥"
+
+* **Aturan #5: Protokol Interaksi Pertama (Untuk Pengguna Baru).**
+    * Jika riwayat obrolan pengguna kosong, respon pertama Anda HARUS berupa sapaan selamat datang dan pertanyaan diagnostik. JANGAN membuat misi.
+    * *Contoh:* "Selamat datang di Fintack. Biar gue bisa jadi arsitek keuangan lo, gue perlu tahu: Apa masalah keuangan terbesar yang bikin lo pusing sekarang?"
 `;
 
+
 // Definisi Alat (Tools) yang bisa digunakan AI
+// PERBARUAN UTAMA: Mengubah nama dan parameter alat
 const tools: Tool[] = [
   {
     functionDeclarations: [
       {
-        name: "createMission",
-        description: "Creates a new mission for the user based on their current financial stage.",
+        name: "createMissionPath", // Nama alat diubah
+        description: "Creates a structured path of missions for the user.",
         parameters: {
           type: FunctionDeclarationSchemaType.OBJECT,
           properties: {
-            title: { type: FunctionDeclarationSchemaType.STRING, description: "The title of the mission.", },
-            description: { type: FunctionDeclarationSchemaType.STRING, description: "A short description of what the user needs to do.", },
-            xpReward: { type: FunctionDeclarationSchemaType.NUMBER, description: "The XP reward for completing the mission, e.g., 100." },
-            levelRequirement: { type: FunctionDeclarationSchemaType.NUMBER, description: "The minimum user level required to start this mission, e.g., 1." }
+            missions: { // Menerima sebuah array
+              type: FunctionDeclarationSchemaType.ARRAY,
+              description: "An array of mission objects to create a path.",
+              items: {
+                type: FunctionDeclarationSchemaType.OBJECT,
+                properties: {
+                  title: { type: FunctionDeclarationSchemaType.STRING, description: "The title of the mission." },
+                  description: { type: FunctionDeclarationSchemaType.STRING, description: "A short description of the mission." },
+                  xpReward: { type: FunctionDeclarationSchemaType.NUMBER, description: "XP reward for the mission." },
+                  levelRequirement: { type: FunctionDeclarationSchemaType.NUMBER, description: "Required level for the mission." },
+                  pathName: { type: FunctionDeclarationSchemaType.STRING, description: "The name of the path (e.g., 'Foundation', 'Attack')." }
+                },
+                required: ["title", "description", "xpReward", "levelRequirement", "pathName"],
+              }
+            }
           },
-          required: ["title", "description", "xpReward", "levelRequirement"],
+          required: ["missions"],
         },
       },
     ],
   },
 ];
+
 
 // Inisialisasi Model Generatif dengan Gemini 2.5 Flash
 const generativeModel = vertexAI.getGenerativeModel({
@@ -69,32 +127,87 @@ const generativeModel = vertexAI.getGenerativeModel({
   tools: tools,
 });
 
-// Fungsi untuk membuat misi (dipanggil oleh AI)
-export const createMission = onCall(async (request) => {
+// PERBARUAN UTAMA: Mengganti createMission dengan createMissionPath
+export const createMissionPath = onCall(async (request) => {
     if (!request.auth) { throw new Error("Authentication required."); }
     const uid = request.auth.uid;
-    // Ambil semua parameter yang mungkin dari data
-    const { title, description, xpReward, levelRequirement } = request.data;
-    if (!title || !description) { throw new Error("Title and description are required."); }
+    const { missions } = request.data;
+
+    if (!missions || !Array.isArray(missions) || missions.length === 0) {
+        throw new Error("Missions array is required.");
+    }
 
     try {
-        const missionData = { 
-            title, 
-            description, 
-            xpReward: xpReward || 100,
-            levelRequirement: levelRequirement || 1,
-            status: 'active', 
-            createdAt: Timestamp.now(), 
-            userId: uid 
-        };
-        await db.collection('users').doc(uid).collection('missions').add(missionData);
-        logger.info(`Mission created for user ${uid}:`, missionData);
-        return { success: true, mission: missionData };
+        const batch = db.batch();
+        const missionsCollection = db.collection('users').doc(uid).collection('missions');
+
+        missions.forEach(mission => {
+            const newMissionRef = missionsCollection.doc();
+            batch.set(newMissionRef, {
+                ...mission,
+                status: 'locked', // Semua misi dimulai sebagai 'locked'
+                createdAt: Timestamp.now(),
+                userId: uid,
+            });
+        });
+        
+        // Aktifkan misi pertama
+        // (Catatan: Ini adalah simplifikasi. Idealnya, kita harus memastikan tidak ada misi aktif lain)
+        const firstMissionId = missionsCollection.doc().id; // Dapatkan ref untuk misi pertama
+        const firstMissionRef = missionsCollection.doc(firstMissionId);
+        batch.set(firstMissionRef, { ...missions[0], id: firstMissionId, status: 'active', createdAt: Timestamp.now(), userId: uid });
+
+
+        await batch.commit();
+        logger.info(`${missions.length} missions created for user ${uid}.`);
+        return { success: true, message: `${missions.length} missions created.` };
     } catch (error) {
-        logger.error(`Error creating mission for user ${uid}:`, error);
-        throw new Error("Failed to create mission.");
+        logger.error(`Error creating mission path for user ${uid}:`, error);
+        throw new Error("Failed to create mission path.");
     }
 });
+
+// =====================================================================
+// FUNGSI BARU: Analisis Keuangan On-Demand
+// =====================================================================
+export const getFinancialAnalysis = onCall(async (request) => {
+    if (!request.auth) {
+        throw new Error("Authentication required.");
+    }
+    const { transactions } = request.data;
+    if (!transactions || !Array.isArray(transactions)) {
+        throw new Error("Transaction data is required.");
+    }
+
+    logger.info(`Generating analysis for user: ${request.auth.uid}`);
+
+    try {
+        const dataSummary = `
+            - Total Transactions: ${transactions.length}
+            - Data Sample: ${JSON.stringify(transactions.slice(0, 5))}
+        `;
+
+        const prompt = `
+            You are in "Strategist Mode" (Kalimasada Persona). Analyze this user's transaction data.
+            Provide 3 sharp, actionable insights based on the data.
+            Focus on identifying spending leaks, potential savings, or income patterns.
+            Format your response as a list.
+
+            DATA:
+            ${dataSummary}
+        `;
+
+        const result = await generativeModel.generateContent(prompt);
+        const analysisText = result.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "Tidak ada insight khusus saat ini. Terus catat transaksi lo!";
+
+        return { success: true, analysis: analysisText };
+
+    } catch (error) {
+        logger.error(`Error generating analysis for user ${request.auth.uid}:`, error);
+        throw new Error("Failed to generate analysis.");
+    }
+});
+
 
 //fungsi anlisa keuangan mingguan
 export const weeklyFinancialCheckup = onSchedule("every sunday 09:00", async (event) => {
@@ -263,9 +376,9 @@ export const markOnboardingComplete = onCall(async (request) => {
 });
 
 
-// Fungsi Chat utama yang sekarang mengambil konteks finansial
+// Fungsi Chat utama yang diperbarui
 export const askMentorAI = onCall(async (request) => {
-  logger.info("--- askMentorAI (v5.4 - First Turn Fix) STARTED ---");
+  logger.info("--- askMentorAI (v7.0 - Mission Path) STARTED ---");
 
   if (!request.auth) { throw new Error("Authentication required."); }
 
@@ -292,7 +405,7 @@ export const askMentorAI = onCall(async (request) => {
       - Current XP: ${userXP}
       - Chat History Status: ${clientHistory.length === 0 ? 'Empty (this is the first message)' : 'Ongoing'}
       ---
-      Based on this context, diagnose their stage in the Financial Hierarchy and answer their question.
+      Based on this context, diagnose their stage in the Financial Hierarchy and answer their question by following your conversational strategy.
     `;
 
     const fullPrompt = `${financialContext}\n\nUser's Question: "${userInput}"`;
@@ -310,20 +423,28 @@ export const askMentorAI = onCall(async (request) => {
 
     if (functionCallPart && functionCallPart.functionCall) {
       const { name, args } = functionCallPart.functionCall;
-      if (name === 'createMission') {
-        const missionArgs = args as { title: string; description: string; xpReward: number; levelRequirement: number };
+      
+      if (name === 'createMissionPath') {
+        const pathArgs = args as { missions: any[] };
         
-        await db.collection('users').doc(uid).collection('missions').add({
-            title: missionArgs.title,
-            description: missionArgs.description,
-            xpReward: missionArgs.xpReward || 100,
-            levelRequirement: missionArgs.levelRequirement || 1,
-            status: 'active',
-            createdAt: Timestamp.now(),
-        });
+        if (pathArgs.missions && Array.isArray(pathArgs.missions)) {
+            const batch = db.batch();
+            const missionsCollection = db.collection('users').doc(uid).collection('missions');
+            
+            pathArgs.missions.forEach((mission, index) => {
+                const newMissionRef = missionsCollection.doc();
+                batch.set(newMissionRef, {
+                    ...mission,
+                    status: index === 0 ? 'active' : 'locked', // Misi pertama 'active', sisanya 'locked'
+                    createdAt: Timestamp.now(),
+                    userId: uid,
+                });
+            });
+            await batch.commit();
+        }
         
-        const result2 = await chat.sendMessage([{ functionResponse: { name: 'createMission', response: { success: true, message: `Mission '${missionArgs.title}' created.` } } }]);
-        const finalResponseText = result2.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "Misi berhasil dibuat. Cek halaman Misi sekarang!";
+        const result2 = await chat.sendMessage([{ functionResponse: { name: 'createMissionPath', response: { success: true } } }]);
+        const finalResponseText = result2.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "Peta perang berhasil dibuat. Cek halaman Misi!";
         return { response: finalResponseText };
       }
     }

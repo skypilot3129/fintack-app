@@ -5,15 +5,12 @@ import { useTypewriter } from '@/hooks/useTypewriter';
 
 interface AiMessageProps {
   text: string;
-  isStreaming: boolean;
+  isStreaming: boolean; // Prop baru untuk kontrol animasi
 }
 
 export default function AiMessage({ text, isStreaming }: AiMessageProps) {
-  // Selalu panggil hook di level atas
-  const typedText = useTypewriter(text, 20);
-  
-  // Gunakan kondisi untuk menentukan teks mana yang akan ditampilkan
-  const displayText = isStreaming ? typedText : text;
+  // Gunakan hook useTypewriter HANYA jika isStreaming bernilai true
+  const displayText = isStreaming ? useTypewriter(text) : text;
 
   return (
     <div className="prose prose-sm prose-invert max-w-none">

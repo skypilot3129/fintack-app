@@ -8,10 +8,12 @@ import { collection, onSnapshot, query, Timestamp, orderBy } from 'firebase/fire
 import { getFunctions, httpsCallable, HttpsCallableResult } from 'firebase/functions';
 import Button from '@/components/Button';
 import FinancialCharts from '@/components/FinancialCharts';
-import { Plus, TrendingDown, TrendingUp, Camera } from 'lucide-react';
+import { Plus, TrendingDown, TrendingUp, Camera, Sparkles, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
 
+// Tipe data untuk Transaksi
 interface Transaction {
   id?: string;
   description: string;
@@ -40,6 +42,12 @@ interface ScanReceiptResponse {
     data: ScannedData;
 }
 
+// Tipe data untuk respons dari Cloud Function
+interface AnalysisResponse {
+    success: boolean;
+    analysis: string;
+}
+
 export default function CashflowPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -54,6 +62,11 @@ export default function CashflowPage() {
   const [showForm, setShowForm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isScanning, setIsScanning] = useState(false);
+
+  // State untuk fitur analisis
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<string | null>(null);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -89,17 +102,15 @@ export default function CashflowPage() {
 
     try {
         const functions = getFunctions();
-        // PERBAIKAN: Definisikan tipe data untuk httpsCallable
-        const addTransaction = httpsCallable<object, AddTransactionResponse>(functions, 'addTransaction');
-        const result: HttpsCallableResult<AddTransactionResponse> = await addTransaction({
+        const addTransaction = httpsCallable(functions, 'addTransaction');
+        const result = await addTransaction({
             description: formData.description,
             amount: parseFloat(formData.amount),
             type: formData.type,
             category: formData.category,
         });
         
-        // Sekarang 'result.data' memiliki tipe yang benar
-        toast.success(result.data.message || 'Transaksi berhasil! +5 XP');
+        toast.success((result.data as any).message || 'Transaksi berhasil! +5 XP');
     } catch (error) {
         console.error("Gagal menambah transaksi:", error);
         toast.error("Gagal menambah transaksi. Coba lagi nanti.");
@@ -122,13 +133,13 @@ export default function CashflowPage() {
         
         try {
             const functions = getFunctions();
-            const scanReceipt = httpsCallable<object, ScanReceiptResponse>(functions, 'scanReceipt');
-            const result: HttpsCallableResult<ScanReceiptResponse> = await scanReceipt({ 
+            const scanReceipt = httpsCallable(functions, 'scanReceipt');
+            const result = await scanReceipt({ 
                 imageB64: base64String,
                 mimeType: file.type 
             });
 
-            const { amount, description, category } = result.data.data;
+            const { amount, description, category } = (result.data as any).data;
 
             if (amount) setAmount(amount.toString());
             if (description) setDescription(description);
@@ -151,6 +162,28 @@ export default function CashflowPage() {
     };
   };
 
+  const handleRequestAnalysis = async () => {
+    if (transactions.length === 0) {
+        toast.error("Catat dulu transaksinya, baru minta analisis!");
+        return;
+    }
+    setIsAnalyzing(true);
+    try {
+        const functions = getFunctions();
+        const getFinancialAnalysis = httpsCallable<object, AnalysisResponse>(functions, 'getFinancialAnalysis');
+        const result = await getFinancialAnalysis({ 
+            transactions: transactions.map(t => ({ amount: t.amount, type: t.type, category: t.category })) 
+        });
+        setAnalysisResult(result.data.analysis);
+        setShowAnalysisModal(true);
+    } catch (error) {
+        console.error("Gagal meminta analisis:", error);
+        toast.error("Gagal mendapatkan analisis dari AI.");
+    } finally {
+        setIsAnalyzing(false);
+    }
+  };
+
   const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
   
   const cashFlowSummary = useMemo(() => {
@@ -169,9 +202,16 @@ export default function CashflowPage() {
   return (
     <main className="p-4 md:p-6 lg:p-8 bg-[#0A0A0A] pb-28 text-white">
       <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-8">
+        <div className="text-center mb-4">
             <h1 className="text-3xl font-black uppercase text-[#A8FF00]">Laporan Intel</h1>
             <p className="text-gray-400 mt-2">Analisis pergerakan uangmu untuk menemukan kebocoran dan peluang.</p>
+        </div>
+        
+        <div className="flex justify-center mb-8">
+            <Button onClick={handleRequestAnalysis} disabled={isAnalyzing} className="!w-auto">
+                <Sparkles className="mr-2" size={16} />
+                {isAnalyzing ? "Menganalisis..." : "Minta Analisis AI"}
+            </Button>
         </div>
         
         <FinancialCharts transactions={transactions} />
@@ -250,6 +290,39 @@ export default function CashflowPage() {
           </motion.ul>
         </div>
       </div>
+      
+      {/* Modal untuk menampilkan hasil analisis */}
+      <AnimatePresence>
+        {showAnalysisModal && (
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/70 z-40 flex justify-center items-center p-4"
+                onClick={() => setShowAnalysisModal(false)}
+            >
+                <motion.div
+                    initial={{ scale: 0.95, y: 20 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.95, y: 20 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                    className="bg-[#18181B] border border-gray-700 shadow-2xl shadow-lime-500/10 rounded-lg w-full max-w-lg m-4 p-6 relative"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-bold text-white">Hasil Analisis Intelijen</h3>
+                        <button onClick={() => setShowAnalysisModal(false)} className="text-gray-500 hover:text-white"><X size={20} /></button>
+                    </div>
+                    
+                    <div className="max-h-[60vh] overflow-y-auto pr-2">
+                        <div className="prose prose-sm prose-invert max-w-none text-gray-300">
+                            <ReactMarkdown>{analysisResult || ''}</ReactMarkdown>
+                        </div>
+                    </div>
+                </motion.div>
+            </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }
