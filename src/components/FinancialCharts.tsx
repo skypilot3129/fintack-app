@@ -42,7 +42,6 @@ export default function FinancialCharts({ transactions }: FinancialChartsProps) 
     return Object.entries(categoryMap).map(([name, value]) => ({ name, value }));
   }, [transactions]);
 
-  // PERBAIKAN UTAMA: Mengubah struktur data untuk Bar Chart
   const incomeVsExpenseData = useMemo(() => {
     const summary = transactions.reduce(
       (acc, curr) => {
@@ -55,7 +54,6 @@ export default function FinancialCharts({ transactions }: FinancialChartsProps) 
       },
       { Pemasukan: 0, Pengeluaran: 0 }
     );
-    // Data diubah menjadi array dengan satu objek yang memiliki nama 'Total'
     return [{ name: 'Total', ...summary }];
   }, [transactions]);
 
@@ -77,7 +75,11 @@ export default function FinancialCharts({ transactions }: FinancialChartsProps) 
                 fill="#8884d8"
                 dataKey="value"
                 nameKey="name"
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                // PERBAIKAN DI SINI:
+                label={({ name, percent }) => {
+                  if (percent === undefined) return name; // Jika persen tidak ada, tampilkan nama saja
+                  return `${name} ${(percent * 100).toFixed(0)}%`; // Jika ada, tampilkan dengan persen
+                }}
               >
                 {expenseByCategory.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -97,14 +99,12 @@ export default function FinancialCharts({ transactions }: FinancialChartsProps) 
       <div className="bg-[#121212] p-6 rounded-lg border border-gray-800">
         <h3 className="font-bold text-lg mb-4">Pemasukan vs Pengeluaran</h3>
         <ResponsiveContainer width="100%" height={300}>
-          {/* PERBAIKAN UTAMA: Menggunakan BarChart biasa, bukan layout vertikal */}
           <BarChart data={incomeVsExpenseData}>
             <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
             <XAxis dataKey="name" />
             <YAxis tickFormatter={(value) => formatCurrency(value)} />
             <Tooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: 'rgba(255, 255, 255, 0.1)' }}/>
             <Legend />
-            {/* Menggunakan dataKey yang sesuai dengan data baru */}
             <Bar dataKey="Pemasukan" fill="#22C55E" radius={[4, 4, 0, 0]} />
             <Bar dataKey="Pengeluaran" fill="#EF4444" radius={[4, 4, 0, 0]} />
           </BarChart>
