@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
-import Button from './Button';
+// Hapus 'Button' dari impor karena tidak digunakan di sini
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
 import {
@@ -16,7 +16,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { Content } from '@google-cloud/vertexai';
-import ReactMarkdown from 'react-markdown';
+// Hapus 'ReactMarkdown' dari impor karena sudah ditangani di AiMessage
 import { Send } from 'lucide-react';
 import AiMessage from './AiMessage';
 
@@ -25,10 +25,9 @@ type Message = {
   sender: 'user' | 'ai';
 };
 
-type FirestoreMessage = {
-    role: 'user' | 'model';
-    parts: { text: string }[];
-    createdAt: Timestamp;
+// Definisikan tipe untuk respons dari Cloud Function
+interface CloudFunctionResponse {
+  response: string;
 }
 
 type ChatInterfaceProps = {
@@ -108,14 +107,14 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
 
     try {
       const functions = getFunctions();
-      const askMentorAI = httpsCallable(functions, 'askMentorAI');
+      const askMentorAI = httpsCallable< { prompt: string; history: Content[] }, CloudFunctionResponse >(functions, 'askMentorAI');
       
       const result = await askMentorAI({
         prompt: userMessageText,
         history: geminiHistory,
       });
 
-      const aiResponseText = (result.data as any).response;
+      const aiResponseText = result.data.response;
 
       await addDoc(collection(db, 'users', user.uid, 'chatHistory'), {
         role: 'model',
@@ -142,7 +141,6 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     }
   };
 
-  // Cari indeks dari pesan AI yang terakhir
   const lastAiMessageIndex = messages.findLastIndex(msg => msg.sender === 'ai');
 
   return (
@@ -166,7 +164,6 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
               }`}
             >
               {msg.sender === 'ai' ? (
-                // Hanya aktifkan streaming untuk pesan AI yang terakhir
                 <AiMessage text={msg.text} isStreaming={index === lastAiMessageIndex} />
               ) : (
                 <p className="text-sm whitespace-pre-wrap">{msg.text}</p>

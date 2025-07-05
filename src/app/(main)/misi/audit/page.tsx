@@ -1,4 +1,3 @@
-// app/(main)/misi/audit/page.tsx
 'use client';
 
 import Button from '@/components/Button';
@@ -9,7 +8,7 @@ export default function AuditMissionPage() {
 
   const handleCompleteMission = () => {
     alert("Misi Selesai! (Simulasi)");
-    router.push('/misi'); // Kembali ke halaman daftar misi
+    router.push('/misi');
   };
 
   return (
@@ -32,7 +31,7 @@ export default function AuditMissionPage() {
                     <input id="langganan" type="text" placeholder="Contoh: Netflix, Spotify, Gym" className="bg-gray-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A8FF00]" />
                 </div>
                 <div className="flex flex-col">
-                    <label htmlFor="jajan" className="text-sm font-bold mb-2">3. Berapa rata-rata pengeluaran untuk 'jajan' atau makan/minum impulsif per minggu?</label>
+                    <label htmlFor="jajan" className="text-sm font-bold mb-2">3. Berapa rata-rata pengeluaran untuk &apos;jajan&apos; atau makan/minum impulsif per minggu?</label>
                     <input id="jajan" type="number" placeholder="Contoh: 150000" className="bg-gray-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A8FF00]" />
                 </div>
             </div>

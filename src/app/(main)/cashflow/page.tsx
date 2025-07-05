@@ -21,6 +21,11 @@ interface Transaction {
   createdAt: Timestamp;
 };
 
+interface AddTransactionResponse {
+  success: boolean;
+  message: string;
+}
+
 export default function CashflowPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -33,8 +38,6 @@ export default function CashflowPage() {
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  
-  // Ref untuk input file dan state untuk loading scan
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isScanning, setIsScanning] = useState(false);
 
@@ -72,7 +75,7 @@ export default function CashflowPage() {
 
     try {
         const functions = getFunctions();
-        const addTransaction = httpsCallable(functions, 'addTransaction');
+        const addTransaction = httpsCallable<object, AddTransactionResponse>(functions, 'addTransaction');
         const result = await addTransaction({
             description: formData.description,
             amount: parseFloat(formData.amount),
@@ -80,7 +83,7 @@ export default function CashflowPage() {
             category: formData.category,
         });
         
-        toast.success((result.data as any).message || 'Transaksi berhasil! +5 XP');
+        toast.success(result.data.message || 'Transaksi berhasil! +5 XP');
     } catch (error) {
         console.error("Gagal menambah transaksi:", error);
         toast.error("Gagal menambah transaksi. Coba lagi nanti.");

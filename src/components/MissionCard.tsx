@@ -1,17 +1,14 @@
 'use client';
 
-import Link from 'next/link';
-import { ArrowRight, Lock } from 'lucide-react';
-
+// Hapus Link, ArrowRight, dan Lock karena tidak digunakan di sini
 interface MissionCardProps {
   title: string;
   description: string;
   status: 'active' | 'completed' | 'locked';
-  href: string;
+  // Hapus prop 'href' karena tidak digunakan
 }
 
-export default function MissionCard({ title, description, status, href }: MissionCardProps) {
-  const isLocked = status === 'locked';
+export default function MissionCard({ title, description, status }: MissionCardProps) {
   const isCompleted = status === 'completed';
 
   const statusStyles = {
@@ -21,7 +18,7 @@ export default function MissionCard({ title, description, status, href }: Missio
   };
 
   return (
-    <div className={`flex-grow ${isLocked ? 'cursor-not-allowed' : ''}`}>
+    <div className="flex-grow">
       <div className={statusStyles[status]}>
         <div className="pl-4">
           <h3 className={`font-bold ${isCompleted ? 'line-through text-gray-400' : 'text-white'}`}>
