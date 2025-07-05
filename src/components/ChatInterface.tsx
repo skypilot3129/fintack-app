@@ -2,8 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
-// Hapus 'Button' dari impor karena tidak digunakan di sini
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getFunctions, httpsCallable, HttpsCallableResult } from 'firebase/functions';
 import { app } from '@/lib/firebase';
 import {
   getFirestore,
@@ -13,10 +12,9 @@ import {
   onSnapshot,
   orderBy,
   serverTimestamp,
-  Timestamp,
+  // Hapus Timestamp dari impor ini karena tidak digunakan
 } from 'firebase/firestore';
 import { Content } from '@google-cloud/vertexai';
-// Hapus 'ReactMarkdown' dari impor karena sudah ditangani di AiMessage
 import { Send } from 'lucide-react';
 import AiMessage from './AiMessage';
 
@@ -25,7 +23,6 @@ type Message = {
   sender: 'user' | 'ai';
 };
 
-// Definisikan tipe untuk respons dari Cloud Function
 interface CloudFunctionResponse {
   response: string;
 }
@@ -109,7 +106,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
       const functions = getFunctions();
       const askMentorAI = httpsCallable< { prompt: string; history: Content[] }, CloudFunctionResponse >(functions, 'askMentorAI');
       
-      const result = await askMentorAI({
+      const result: HttpsCallableResult<CloudFunctionResponse> = await askMentorAI({
         prompt: userMessageText,
         history: geminiHistory,
       });
@@ -137,11 +134,24 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage(e as any);
+      // Buat event buatan yang sesuai dengan tipe React.FormEvent
+      const syntheticEvent = {
+        ...e,
+        preventDefault: () => e.preventDefault(),
+        stopPropagation: () => e.stopPropagation(),
+        isDefaultPrevented: () => e.isDefaultPrevented(),
+        isPropagationStopped: () => e.isPropagationStopped(),
+        persist: () => {},
+        currentTarget: e.currentTarget.form,
+        target: e.currentTarget,
+      } as unknown as React.FormEvent;
+      handleSendMessage(syntheticEvent);
     }
   };
 
   const lastAiMessageIndex = messages.findLastIndex(msg => msg.sender === 'ai');
+
+
 
   return (
     <div className="flex flex-col h-full bg-[#121212] rounded-lg border border-gray-800">

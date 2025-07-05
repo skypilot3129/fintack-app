@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot, query, Timestamp, orderBy } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getFunctions, httpsCallable, HttpsCallableResult } from 'firebase/functions';
 import Button from '@/components/Button';
 import FinancialCharts from '@/components/FinancialCharts';
 import { Plus, TrendingDown, TrendingUp, Camera } from 'lucide-react';
@@ -21,6 +21,7 @@ interface Transaction {
   createdAt: Timestamp;
 };
 
+// Definisikan tipe untuk respons dari Cloud Function
 interface AddTransactionResponse {
   success: boolean;
   message: string;
@@ -76,7 +77,7 @@ export default function CashflowPage() {
     try {
         const functions = getFunctions();
         const addTransaction = httpsCallable<object, AddTransactionResponse>(functions, 'addTransaction');
-        const result = await addTransaction({
+        const result: HttpsCallableResult<AddTransactionResponse> = await addTransaction({
             description: formData.description,
             amount: parseFloat(formData.amount),
             type: formData.type,
