@@ -12,6 +12,7 @@ import { Plus, TrendingDown, TrendingUp, Camera } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// Tipe data untuk transaksi di UI
 interface Transaction {
   id?: string;
   description: string;
@@ -21,20 +22,20 @@ interface Transaction {
   createdAt: Timestamp;
 };
 
-// Definisikan tipe untuk respons dari Cloud Function
+// Tipe data untuk respons dari Cloud Function addTransaction
 interface AddTransactionResponse {
   success: boolean;
   message: string;
 }
 
-// Definisikan tipe untuk data hasil scan struk
+// Tipe data untuk data hasil scan struk
 interface ScannedData {
     amount?: number;
     description?: string;
     category?: string;
 }
 
-// Definisikan tipe untuk respons dari Cloud Function scanReceipt
+// Tipe data untuk respons dari Cloud Function scanReceipt
 interface ScanReceiptResponse {
     success: boolean;
     data: ScannedData;
@@ -90,7 +91,7 @@ export default function CashflowPage() {
     try {
         const functions = getFunctions();
         const addTransaction = httpsCallable<object, AddTransactionResponse>(functions, 'addTransaction');
-        const result: HttpsCallableResult<AddTransactionResponse> = await addTransaction({
+        const result = await addTransaction({
             description: formData.description,
             amount: parseFloat(formData.amount),
             type: formData.type,
@@ -120,12 +121,14 @@ export default function CashflowPage() {
         
         try {
             const functions = getFunctions();
+            // Mendefinisikan tipe data secara eksplisit untuk httpsCallable
             const scanReceipt = httpsCallable<object, ScanReceiptResponse>(functions, 'scanReceipt');
-            const result = await scanReceipt({ 
+            const result: HttpsCallableResult<ScanReceiptResponse> = await scanReceipt({ 
                 imageB64: base64String,
                 mimeType: file.type 
             });
 
+            // Sekarang 'result.data' memiliki tipe yang benar, tidak lagi 'any'
             const { amount, description, category } = result.data.data;
 
             if (amount) setAmount(amount.toString());
