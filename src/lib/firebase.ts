@@ -1,9 +1,8 @@
-// src/lib/firebase.ts
-import { initializeApp, getApps } from "firebase/app";
+// 1. Impor tipe 'FirebaseApp' dari firebase/app
+import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
-// Gunakan Environment Variables untuk konfigurasi
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -13,8 +12,10 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+// 2. Deklarasikan variabel 'app' dengan tipe FirebaseApp
+let app: FirebaseApp;
+
 // Inisialisasi Firebase hanya jika belum ada
-let app;
 if (!getApps().length) {
   app = initializeApp(firebaseConfig);
 } else {
