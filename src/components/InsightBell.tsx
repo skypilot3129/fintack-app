@@ -34,6 +34,9 @@ export default function InsightBell() {
     const unreadCount = insights.filter(insight => !insight.isRead).length;
 
     const handleOpen = async () => {
+        // PERBAIKAN: Tambahkan 'guard clause' untuk memastikan user ada
+        if (!user) return; 
+
         setIsOpen(true);
         // Tandai semua insight sebagai sudah dibaca saat modal dibuka
         for (const insight of insights) {
