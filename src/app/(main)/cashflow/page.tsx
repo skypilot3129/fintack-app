@@ -27,6 +27,19 @@ interface AddTransactionResponse {
   message: string;
 }
 
+// Definisikan tipe untuk data hasil scan struk
+interface ScannedData {
+    amount?: number;
+    description?: string;
+    category?: string;
+}
+
+// Definisikan tipe untuk respons dari Cloud Function scanReceipt
+interface ScanReceiptResponse {
+    success: boolean;
+    data: ScannedData;
+}
+
 export default function CashflowPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -92,8 +105,7 @@ export default function CashflowPage() {
         setIsSubmitting(false);
     }
   };
-
-  // Fungsi untuk menangani proses scan struk
+  
   const handleScanReceipt = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -101,7 +113,6 @@ export default function CashflowPage() {
     setIsScanning(true);
     const toastId = toast.loading('Menganalisis struk...');
 
-    // Konversi gambar ke Base64
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = async () => {
@@ -109,20 +120,19 @@ export default function CashflowPage() {
         
         try {
             const functions = getFunctions();
-            const scanReceipt = httpsCallable(functions, 'scanReceipt');
+            const scanReceipt = httpsCallable<object, ScanReceiptResponse>(functions, 'scanReceipt');
             const result = await scanReceipt({ 
                 imageB64: base64String,
                 mimeType: file.type 
             });
 
-            const { amount, description, category } = (result.data as any).data;
+            const { amount, description, category } = result.data.data;
 
-            // Isi form secara otomatis
             if (amount) setAmount(amount.toString());
             if (description) setDescription(description);
             if (category) setCategory(category);
-            setType('expense'); // Default ke pengeluaran
-            setShowForm(true); // Tampilkan form yang sudah terisi
+            setType('expense');
+            setShowForm(true);
 
             toast.success('Struk berhasil dibaca!', { id: toastId });
 
@@ -133,8 +143,7 @@ export default function CashflowPage() {
             setIsScanning(false);
         }
     };
-    reader.onerror = (error) => {
-        console.error("Error reading file:", error);
+    reader.onerror = () => {
         toast.error("Gagal membaca file gambar.", { id: toastId });
         setIsScanning(false);
     };

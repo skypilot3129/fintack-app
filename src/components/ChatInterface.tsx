@@ -134,23 +134,15 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      // Buat event buatan yang sesuai dengan tipe React.FormEvent
-      const syntheticEvent = {
-        ...e,
-        preventDefault: () => e.preventDefault(),
-        stopPropagation: () => e.stopPropagation(),
-        isDefaultPrevented: () => e.isDefaultPrevented(),
-        isPropagationStopped: () => e.isPropagationStopped(),
-        persist: () => {},
-        currentTarget: e.currentTarget.form,
-        target: e.currentTarget,
-      } as unknown as React.FormEvent;
-      handleSendMessage(syntheticEvent);
+      // Cara yang lebih aman untuk memicu submit dari textarea
+      if (e.currentTarget.form) {
+        // Memicu event submit pada form
+        e.currentTarget.form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+      }
     }
   };
 
   const lastAiMessageIndex = messages.findLastIndex(msg => msg.sender === 'ai');
-
 
 
   return (
