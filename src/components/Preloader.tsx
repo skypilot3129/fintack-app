@@ -1,9 +1,10 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { motion, Variants } from 'framer-motion';
 
-// Varian animasi untuk SVG path (garis grafik)
-const draw = {
+// PERBAIKAN: Secara eksplisit memberikan tipe 'Variants' pada konstanta
+// Ini membantu TypeScript untuk memvalidasi struktur objeknya.
+const draw: Variants = {
   hidden: { pathLength: 0, opacity: 0 },
   visible: {
     pathLength: 1,
@@ -15,8 +16,7 @@ const draw = {
   }
 };
 
-// Varian animasi untuk teks logo "Fintack"
-const textFadeIn = {
+const textFadeIn: Variants = {
     hidden: { opacity: 0, y: 10 },
     visible: {
         opacity: 1,
