@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
-import Button from './Button';
+// PERBAIKAN: Hapus 'Button' yang tidak digunakan
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
 import {
@@ -14,7 +14,7 @@ import {
   onSnapshot,
   orderBy,
   serverTimestamp,
-  Timestamp,
+  // PERBAIKAN: Hapus 'Timestamp' yang tidak digunakan
 } from 'firebase/firestore';
 import { Content } from '@/types/gemini'; // Menggunakan tipe lokal
 import { Send } from 'lucide-react';
@@ -29,6 +29,11 @@ type ChatInterfaceProps = {
   user: User;
 };
 
+// PERBAIKAN: Tambahkan tipe untuk response dari AI
+type AskMentorAIResponse = {
+  response: string;
+}
+
 export default function ChatInterface({ user }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [geminiHistory, setGeminiHistory] = useState<Content[]>([]);
@@ -37,7 +42,6 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   
-  // 1. State baru untuk melacak apakah ini pemuatan awal
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const db = getFirestore(app);
@@ -49,10 +53,9 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     const q = query(chatHistoryColRef, orderBy('createdAt', 'asc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      // 2. PERBAIKAN PESAN SELAMAT DATANG
       if (snapshot.empty) {
         setMessages([{ text: `Selamat datang di Fintack, ${user.displayName || 'Pilot'}. Apa masalah keuangan terbesar lo sekarang? Langsung ke intinya! 🔥`, sender: 'ai' }]);
-        setIsInitialLoad(false); // Tetap matikan initial load
+        setIsInitialLoad(false);
         return;
       }
 
@@ -70,7 +73,6 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
       }));
       setGeminiHistory(apiHistory);
       
-      // 3. Setelah riwayat dimuat, matikan status pemuatan awal
       setIsInitialLoad(false);
     });
 
@@ -89,8 +91,8 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     }
   }, [input]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // PERBAIKAN: Pisahkan logika pengiriman pesan agar bisa dipanggil dari mana saja
+  const submitMessage = async () => {
     if (input.trim() === '' || isAiTyping) return;
 
     const userMessageText = input;
@@ -113,7 +115,8 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
         history: geminiHistory,
       });
 
-      const aiResponseText = (result.data as any).response;
+      // PERBAIKAN: Gunakan tipe yang sudah didefinisikan
+      const aiResponseText = (result.data as AskMentorAIResponse).response;
 
       await addDoc(collection(db, 'users', user.uid, 'chatHistory'), {
         role: 'model',
@@ -133,14 +136,18 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     }
   };
 
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitMessage();
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage(e as any);
+      submitMessage();
     }
   };
 
-  // Cari indeks dari pesan AI yang terakhir
   const lastAiMessageIndex = messages.findLastIndex(msg => msg.sender === 'ai');
 
   return (
@@ -164,8 +171,6 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
               }`}
             >
               {msg.sender === 'ai' ? (
-                // 4. PERBAIKAN LOGIKA STREAMING
-                // Animasi hanya berjalan jika ini adalah pesan terakhir DAN bukan pemuatan awal
                 <AiMessage text={msg.text} isStreaming={index === lastAiMessageIndex && !isInitialLoad} />
               ) : (
                 <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
@@ -184,7 +189,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
       </div>
 
       <div className="p-4 border-t border-gray-800 flex-shrink-0">
-        <form onSubmit={handleSendMessage} className="flex items-end space-x-3">
+        <form onSubmit={handleFormSubmit} className="flex items-end space-x-3">
           <textarea
             ref={textareaRef}
             value={input}

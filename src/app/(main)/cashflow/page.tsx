@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot, query, Timestamp, orderBy } from 'firebase/firestore';
-import { getFunctions, httpsCallable, HttpsCallableResult } from 'firebase/functions';
+// PERBAIKAN: Hapus 'HttpsCallableResult' yang tidak digunakan
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import Button from '@/components/Button';
 import FinancialCharts from '@/components/FinancialCharts';
 import { Plus, TrendingDown, TrendingUp, Camera, Sparkles, X } from 'lucide-react';
@@ -23,23 +24,15 @@ interface Transaction {
   createdAt: Timestamp;
 };
 
-// Definisikan tipe untuk respons dari Cloud Function addTransaction
-interface AddTransactionResponse {
-  success: boolean;
-  message: string;
-}
+// PERBAIKAN: Hapus tipe data yang tidak digunakan
+// interface AddTransactionResponse { ... }
+// interface ScanReceiptResponse { ... }
 
 // Definisikan tipe untuk data hasil scan struk
 interface ScannedData {
     amount?: number;
     description?: string;
     category?: string;
-}
-
-// Definisikan tipe untuk respons dari Cloud Function scanReceipt
-interface ScanReceiptResponse {
-    success: boolean;
-    data: ScannedData;
 }
 
 // Tipe data untuk respons dari Cloud Function
@@ -110,7 +103,10 @@ export default function CashflowPage() {
             category: formData.category,
         });
         
-        toast.success((result.data as any).message || 'Transaksi berhasil! +5 XP');
+        // PERBAIKAN: Beri tipe spesifik pada result.data
+        const responseData = result.data as { success: boolean; message: string; };
+        toast.success(responseData.message || 'Transaksi berhasil! +5 XP');
+
     } catch (error) {
         console.error("Gagal menambah transaksi:", error);
         toast.error("Gagal menambah transaksi. Coba lagi nanti.");
@@ -139,7 +135,9 @@ export default function CashflowPage() {
                 mimeType: file.type 
             });
 
-            const { amount, description, category } = (result.data as any).data;
+            // PERBAIKAN: Beri tipe spesifik pada result.data
+            const responseData = result.data as { success: boolean, data: ScannedData };
+            const { amount, description, category } = responseData.data;
 
             if (amount) setAmount(amount.toString());
             if (description) setDescription(description);
