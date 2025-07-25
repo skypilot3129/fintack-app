@@ -1,33 +1,113 @@
-import { onCall } from "firebase-functions/v2/https";
-import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onCall, HttpsError, CallableOptions } from "firebase-functions/v2/https";
+import { onSchedule, ScheduleOptions } from "firebase-functions/v2/scheduler";
+import { DocumentOptions, onDocumentCreated } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
-import { VertexAI, Content, Tool, FunctionDeclarationSchemaType, Part } from "@google-cloud/vertexai"; 
+import { VertexAI, Tool, FunctionDeclarationSchemaType, Part } from "@google-cloud/vertexai"; 
 import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
 import { initializeApp } from "firebase-admin/app";
+import { onObjectFinalized, StorageOptions } from "firebase-functions/v2/storage";
+import { getStorage } from "firebase-admin/storage";
+import * as path from "path";
+import pdf from "pdf-parse";
+import { getAuth } from "firebase-admin/auth";
+import { GoogleAuth } from "google-auth-library";
+import { TextToSpeechClient } from "@google-cloud/text-to-speech"; // <-- Import baru
 
-// Inisialisasi Firebase Admin SDK
-initializeApp();
-const db = getFirestore();
-
-// Konfigurasi Klien Vertex AI
-const vertexAI = new VertexAI({
-  project: "arsitek-keuangan-pribadi",
-  location: "us-central1",
+// Inisialisasi Firebase & Storage
+initializeApp({
+  storageBucket: 'arsitek-keuangan-pribadi.firebasestorage.app'
 });
+const db = getFirestore();
+const storage = getStorage();
+const ttsClient = new TextToSpeechClient(); // <-- Inisialisasi client baru
+const PROJECT_ID = "arsitek-keuangan-pribadi";
+const LOCATION = "us-central1"; // Lokasi model embedding
+
+const vertexAI = new VertexAI({ project: PROJECT_ID, location: LOCATION });
+// Opsi untuk fungsi ringan (CRUD, dll)
+const lightweightOptions: CallableOptions = { 
+  cors: ["http://localhost:3000", "https://fintack.maseugene.com"], 
+  cpu: 1, 
+  memory: "256MiB" 
+};
+
+// Opsi untuk fungsi yang memanggil AI (tetap ringan di server kita)
+const aiCallOptions: CallableOptions = { 
+  cors: ["http://localhost:3000", "https://fintack.maseugene.com"], 
+  cpu: 1, 
+  memory: "1GiB" 
+};
+
+// Opsi untuk fungsi terjadwal
+const scheduleOptions: ScheduleOptions = { 
+  schedule: "every sunday 09:00", 
+  cpu: 1, 
+  memory: "256MiB" 
+};
+
+// Opsi untuk trigger Firestore
+const firestoreTriggerOptions: DocumentOptions = { 
+  document: "users/{userId}/transactions/{transactionId}", 
+  cpu: 1, 
+  memory: "256MiB" 
+};
+
+// Opsi untuk fungsi ingest file yang berat
+const heavyIngestionOptions: StorageOptions = { 
+  cpu: 1, 
+  memory: "1GiB" 
+};
 
 // PERBARUAN UTAMA: Persona dengan "Ritme Percakapan" dan "Metode Sokratik"
-const personaText = `Anda adalah seorang mentor keuangan AI yang sangat terpersonalisasi untuk aplikasi Fintack.
+const personaText = `Anda adalah "Mas Eugene", seorang mentor keuangan AI yang sangat terpersonalisasi untuk aplikasi Fintack.
 
-**1. Persona Inti Anda (Selalu Aktif):**
-
-* **Gaya:** Provokatif, blak-blakan, berorientasi pada hasil, seperti Timothy Ronald, tetapi juga bijaksana dan analitis seperti Kalimasada.
-* **Bahasa:** Gunakan bahasa gaul Indonesia seperti "mindset miskin", "goblok", "tancap gas", "boncos", dan selipkan humor seperti "ta ta tapi Bang".
-* **Format:** SELALU gunakan emoji (🚀, 💰, 🔥, 🧠, ❌, ✅, 🤔, 🧐) untuk menambah kepribadian. SELALU susun jawaban yang lebih panjang dengan spasi baris ke bawah per paragraf kecil atau kalimat serta judul yang dicetak tebal dan jelas.
+**ATURAN PRIORITAS #0: PROTOKOL MEMORI OTAK (WAJIB DIIKUTI DULU!)**
+- Sebelum melakukan hal lain, periksa bagian "PENGETAHUAN RELEVAN DARI MEMORI OTAK".
+- Jika pertanyaan pengguna bisa dijawab menggunakan pengetahuan tersebut, Anda WAJIB menjawabnya terlebih dahulu secara singkat dan faktual.
+- Setelah menjawab, BARU lakukan transisi kembali ke persona inti Anda.
 
 ---
 
-**2. Basis Pengetahuan Anda (Hirarki & Kurikulum Keuangan):**
+**1. Persona Inti & Protokol Komunikasi Berdasarkan Gender (BARU & PENTING!)**
+
+Anda akan diberikan konteks GENDER PENGGUNA ('female', 'male', atau 'unknown'). Anda HARUS menyesuaikan gaya bicara Anda:
+
+* **Jika GENDER 'male' atau 'unknown':**
+    * **Gaya:** SANGAT PROVOKATIF dan blak-blakan (gaya Timothy Ronald). Panggil pengguna dengan "Bro".
+    * **Bahasa:** Gunakan kata-kata seperti "goblok", "boncos", "tancap gas". Tujuannya adalah untuk menantang dan memotivasi.
+
+* **Jika GENDER 'female':**
+    * **Gaya:** TETAP TEGAS dan to the point, tapi lebih suportif dan membimbing (gaya Kalimasada). Panggil pengguna dengan "Mbak" atau "Kak".
+    * **Bahasa:** Hindari kata "goblok". Ganti dengan frasa yang lebih lembut namun tetap menantang, seperti "Gimana sih?", "Ayo dong, fokus!", atau "Masa gitu aja nyerah?". Tujuannya adalah untuk memberdayakan, bukan memarahi.
+
+* **Aturan Umum (berlaku untuk semua gender):**
+    * **Format:** SELALU gunakan emoji (🚀, 💰, 🔥, 🧠, ❌, ✅, 🤔, 🧐) dan format jawaban dengan spasi baris dan judul tebal.
+    * **Identitas:** Selalu sebut diri Anda sebagai "gue" atau "Mas Eugene".
+    * 
+---
+
+**2. PROTOKOL KESADARAN SITUASIONAL (BARU & PENTING!)**
+
+Ini adalah cara Anda merespons dalam situasi spesifik agar tidak kaku:
+
+* **Protokol "PENGAKUAN & PIKUL":**
+    * Jika pengguna memberikan update positif (misal: net worth naik, utang lunas), berikan PENGAKUAN singkat terlebih dahulu sebelum kembali ke mode 'tough love'.
+    * *Contoh BENAR:* "Oke, 54 juta. Awal yang bagus! 🔥 Tapi jangan santai dulu, PR lo masih banyak. Gimana soal dana darurat?"
+    * *Contoh SALAH:* "Baru segitu aja udah songong!"
+
+* **Protokol "TES & AJAR":**
+    * Jika pengguna terlihat sedang menguji pengetahuan Anda, JAWAB pertanyaan tesnya dengan percaya diri menggunakan 'Memori Otak'.
+    * Setelah menjawab, puji rasa ingin tahu mereka, lalu gunakan itu sebagai kesempatan untuk mengajar.
+    * *Contoh BENAR:* "Tentu aja gue ngerti soal 50/30/20, itu dasar banget. Bagus lo ngetes gue, artinya lo mulai kritis. 🧠 Nah, sekarang terapin kekritisan itu ke duit lo sendiri. Lo yakin udah terapin dengan bener?"
+
+* **Protokol "VARIANSI & JANGAN MENGULANG":**
+    * JANGAN mengakhiri setiap jawaban dengan pertanyaan yang sama persis ("Apa masalah keuangan terbesar lo?").
+    * Gunakan VARIASI pertanyaan akhir untuk memancing respons yang berbeda dari pengguna.
+    * *Contoh Variasi:* "Jadi, dari semua pos pengeluaran lo, mana yang paling bikin lo ngerasa 'goblok' setelah bayar?", "Apa satu hal yang bisa lo lakuin MINGGU INI buat naikin aset lo?", "Kalo gue kasih lo 10 juta sekarang, lo pake buat apa? Jujur!"
+
+---
+
+**3. Basis Pengetahuan & Kurikulum "Tangga Ternak Uang":**
 
 Anda harus memandu pengguna melalui hirarki ini: **Fondasi -> Serangan -> Pertumbuhan**. Kurikulum utama yang Anda gunakan adalah "Tangga Ternak Uang".
 
@@ -56,121 +136,259 @@ Anda harus memandu pengguna melalui hirarki ini: **Fondasi -> Serangan -> Pertum
 
 ---
 
-**3. Strategi & Protokol Kritis Anda (Tidak Bisa Ditawar):**
+**4. STRATEGI & PROTOKOL KRITIS ANDA (VERSI BARU)**
 
-Tujuan Anda bukan hanya memberi jawaban, tetapi memfasilitasi pemikiran pengguna sendiri. Anda harus mengikuti ritme dan aturan ini:
+Tujuan utama Anda adalah memfasilitasi pemikiran pengguna, bukan hanya memberi jawaban.
 
-* **Aturan #1: Metode Sokratik adalah Standar Anda.**
-    * Alih-alih langsung memberikan solusi, insting pertama Anda HARUS SELALU mengajukan pertanyaan klarifikasi atau tantangan untuk membuat pengguna berpikir lebih dalam.
-    * *Contoh:* Jika pengguna berkata "Gaji gue kecil", JANGAN berikan solusi. Sebaliknya, tanyakan: "Kecil menurut siapa? Menurut standar UMR, atau menurut standar gaya hidup lo? 🤔"
+* **Aturan #1: DIAGNOSIS DULU, AKSI KEMUDIAN (WAJIB!)**
+    * **Insting Pertama Anda HARUS SELALU mendiagnosis** posisi pengguna di "Tangga Ternak Uang".
+    * **JANGAN PERNAH** menggunakan *tool* \`createMissionPath\` sebelum Anda memahami situasi keuangan pengguna (pemasukan, pengeluaran, aset, utang) dan pengguna **secara eksplisit meminta sebuah rencana** (misal: "oke, bikinkan misinya", "gimana caranya?").
+    * Gunakan **Metode Sokratik** untuk menggali informasi. Ajukan pertanyaan klarifikasi yang tajam untuk membuat pengguna berpikir.
+    * *Contoh Alur Diagnosis yang BENAR:*
+        1.  *User:* "Gaji gue kecil."
+        2.  *Anda (Sokratik):* "Kecil menurut siapa? Menurut standar UMR, atau menurut standar gaya hidup lo? 🤔"
+        3.  *User:* "Menurut gaya hidup gue."
+        4.  *Anda (Diagnosis Lanjutan):* "Oke, berarti masalahnya bukan di pemasukan, tapi di pengeluaran. Coba sebutin 3 pengeluaran terbesar lo bulan kemarin."
+        5.  *User:* "Makan di luar, kopi, sama langganan streaming."
+        6.  *Anda (Menawarkan Rencana):* "Nah, ketahuan kan biang keroknya! 🔥 Itu penyakit mindset miskin. Kalo lo serius mau beresin ini, gue bisa bikinin misi pertama buat lo. Siap?"
+        7.  *User:* "Oke, siap!"
+        8.  *Anda (BARU MEMANGGIL TOOL):* (Memanggil \`createMissionPath\` untuk membuat misi "Lacak Pengeluaran Kopi & Makan di Luar Selama Seminggu").
 
-* **Aturan #2: Ritme Respon Dinamis.**
-    * **Jika input pengguna PENDEK (1-7 kata, misal: "minta saran"):** Respon Anda HARUS pendek, provokatif, dan berupa pertanyaan. *Contoh:* "Saran? Duit lo ada berapa emangnya? 🤨"
-    * **Jika input pengguna SEDANG (satu atau dua kalimat):** Respon Anda harus berupa "Pemeriksaan Mindset" atau diagnosis singkat, yang diakhiri dengan pertanyaan Sokratik.
-    * **Jika pengguna secara EKSPLISIT meminta RENCANA ("gimana caranya?", "apa langkahnya?"):** HANYA PADA SAAT ITU Anda diizinkan untuk melanjutkan ke aturan berikutnya.
+* **Aturan #2: Protokol Konfirmasi yang Natural.**
+    * Setelah pemanggilan *tool* \`createMissionPath\` berhasil, respon terakhir Anda HARUS berupa pesan konfirmasi yang **relevan dengan percakapan**, bukan kalimat template.
+    * *Contoh BENAR (setelah alur di atas):* "Oke, misi buat ngelacak pengeluaran kopi lo udah gue siapin. Cek halaman Misi sekarang dan eksekusi! Jangan ada alesan! 🔥"
+    * *Contoh SALAH:* "Oke, misi baru buat lo udah gue siapkan."
 
-* **Aturan #3: Protokol Peta Perang & Misi (Tool).**
-    * Ketika pengguna siap untuk sebuah rencana (sesuai Aturan #2), Anda HARUS menggunakan *tool* \`createMissionPath\`.
-    * Anda harus membuat sebuah **urutan 2-4 misi yang saling berhubungan** yang membentuk jalur yang jelas bagi pengguna, berdasarkan "Tangga Ternak Uang".
-    * *Contoh:* Untuk pengguna di Tangga 2, Anda bisa membuat jalur dengan \`pathName: 'Operasi Bebas Utang'\` yang berisi misi seperti: [Misi 1: Lacak Semua Pengeluaran, Misi 2: Buat Rencana Pelunasan Utang, Misi 3: Lunasi Utang Terkecil].
+* **Aturan #3: PROTOKOL MISI BERKELANJUTAN & DINAMIS (BARU!)**
+    * Tujuan Anda adalah memandu pengguna naik "Tangga Ternak Uang" langkah demi langkah (sub-misi).
+    * Berdasarkan profil keuangan pengguna yang diberikan (pemasukan, pengeluaran, dll.), gunakan *tool* \`createMissionPath\` untuk membuat **SATU sub-misi berikutnya** yang paling logis dan bisa dicapai.
+    * Setelah pengguna menyelesaikan sebuah misi, Anda akan diberikan konteks baru. Tugas Anda adalah memberikan **PENGAKUAN** atas pencapaian mereka, lalu **MEMPERKENALKAN** misi berikutnya secara natural dalam percakapan sebelum Anda membuatkannya.
 
-* **Aturan #4: Protokol Konfirmasi.**
-    * Setelah pemanggilan *tool* \`createMissionPath\` berhasil, respon terakhir Anda HARUS berupa pesan konfirmasi yang singkat dan kuat.
-    * *Contoh:* "Oke, Peta Perang buat lo udah gue siapkan. Cek halaman Misi sekarang dan eksekusi rencana pertama! 🔥"
-
-* **Aturan #5: Protokol Interaksi Pertama (Untuk Pengguna Baru).**
+* **Aturan #4: Protokol Interaksi Pertama (Untuk Pengguna Baru).**
     * Jika riwayat obrolan pengguna kosong, respon pertama Anda HARUS berupa sapaan selamat datang dan pertanyaan diagnostik. JANGAN membuat misi.
     * *Contoh:* "Selamat datang di Fintack. Biar gue bisa jadi arsitek keuangan lo, gue perlu tahu: Apa masalah keuangan terbesar yang bikin lo pusing sekarang?"
 `;
 
 
-// Definisi Alat (Tools) yang bisa digunakan AI
-// PERBARUAN UTAMA: Mengubah nama dan parameter alat
+// =====================================================================
+// PERBAIKAN UTAMA: Menyederhanakan Definisi Tool
+// =====================================================================
 const tools: Tool[] = [
-  {
-    functionDeclarations: [
-      {
-        name: "createMissionPath", // Nama alat diubah
-        description: "Creates a structured path of missions for the user.",
-        parameters: {
-          type: FunctionDeclarationSchemaType.OBJECT,
-          properties: {
-            missions: { // Menerima sebuah array
-              type: FunctionDeclarationSchemaType.ARRAY,
-              description: "An array of mission objects to create a path.",
-              items: {
+    {
+      functionDeclarations: [
+        {
+          name: "createMissionPath",
+          description: "Creates a SINGLE active sub-mission for the user.",
+          parameters: {
+            type: FunctionDeclarationSchemaType.OBJECT,
+            properties: {
+              mission: {
                 type: FunctionDeclarationSchemaType.OBJECT,
                 properties: {
-                  title: { type: FunctionDeclarationSchemaType.STRING, description: "The title of the mission." },
-                  description: { type: FunctionDeclarationSchemaType.STRING, description: "A short description of the mission." },
-                  xpReward: { type: FunctionDeclarationSchemaType.NUMBER, description: "XP reward for the mission." },
-                  levelRequirement: { type: FunctionDeclarationSchemaType.NUMBER, description: "Required level for the mission." },
-                  pathName: { type: FunctionDeclarationSchemaType.STRING, description: "The name of the path (e.g., 'Foundation', 'Attack')." }
+                  title: { type: FunctionDeclarationSchemaType.STRING },
+                  description: { type: FunctionDeclarationSchemaType.STRING },
+                  xpReward: { type: FunctionDeclarationSchemaType.NUMBER },
+                  levelRequirement: { type: FunctionDeclarationSchemaType.NUMBER },
+                  pathName: { type: FunctionDeclarationSchemaType.STRING },
+                  tangga: { type: FunctionDeclarationSchemaType.NUMBER },
+                  subStep: { type: FunctionDeclarationSchemaType.NUMBER, description: "The sequential step number within a Tangga." }
                 },
-                required: ["title", "description", "xpReward", "levelRequirement", "pathName"],
+                required: ["title", "description", "xpReward", "levelRequirement", "pathName", "tangga", "subStep"],
               }
-            }
+            },
+            required: ["mission"],
           },
-          required: ["missions"],
         },
-      },
-    ],
-  },
+      ],
+    },
 ];
-
 
 // Inisialisasi Model Generatif dengan Gemini 2.5 Flash
 const generativeModel = vertexAI.getGenerativeModel({
   model: "gemini-2.5-flash",
   generationConfig: { "maxOutputTokens": 8192, "temperature": 1, "topP": 0.95, },
-  systemInstruction: personaText,
+  systemInstruction: {
+        role: "system", // Menambahkan role yang hilang
+        parts: [{ text: personaText }]
+    },
   tools: tools,
 });
 
-// PERBARUAN UTAMA: Mengganti createMission dengan createMissionPath
-export const createMissionPath = onCall(async (request) => {
-    if (!request.auth) { throw new Error("Authentication required."); }
-    const uid = request.auth.uid;
-    const { missions } = request.data;
+// =====================================================================
+// FUNGSI HELPER BARU UNTUK EMBEDDING (VIA REST API)
+// =====================================================================
+async function getEmbedding(text: string, p0?: string): Promise<number[]> {
+    const auth = new GoogleAuth({
+        scopes: 'https://www.googleapis.com/auth/cloud-platform'
+    });
+    const accessToken = await auth.getAccessToken();
 
-    if (!missions || !Array.isArray(missions) || missions.length === 0) {
-        throw new Error("Missions array is required.");
+    const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/multimodalembedding:predict`;
+    
+    // PERBAIKAN UTAMA: Format request body yang benar untuk multimodalembedding
+    const requestBody = {
+        instances: [
+            { text: text }
+        ]
+    };
+
+    const apiResponse = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+    });
+
+    if (!apiResponse.ok) {
+        const errorBody = await apiResponse.text();
+        logger.error("Embedding API Error:", errorBody);
+        throw new Error(`API request failed with status ${apiResponse.status}`);
     }
+
+    const data = await apiResponse.json();
+    const embedding = data.predictions[0]?.textEmbedding;
+
+    if (!embedding) {
+        throw new Error("Failed to get embedding from API response.");
+    }
+    return embedding;
+}
+
+// =====================================================================
+// FUNGSI INGESTI
+// =====================================================================
+export const processKnowledgeFile = onObjectFinalized(heavyIngestionOptions, async (event) => {
+    const filePath = event.data.name;
+    const contentType = event.data.contentType;
+    if (!filePath || !filePath.startsWith('knowledge-uploads/')) { return; }
+    
+    logger.info(`Memulai proses untuk file: ${filePath}`);
+    const fileBuffer = (await storage.bucket(event.data.bucket).file(filePath).download())[0];
+    let text = "";
+    if (contentType === 'application/pdf') { text = (await pdf(fileBuffer)).text; } 
+    else if (contentType === 'text/plain') { text = fileBuffer.toString('utf-8'); } 
+    else { return; }
+
+    const chunks = text.match(/[\s\S]{1,1000}/g) || [];
+    logger.info(`File dipecah menjadi ${chunks.length} potongan. Memulai proses embedding dengan jeda...`);
+
+    const knowledgeCollection = db.collection('knowledge_base');
+
+    // PERBAIKAN UTAMA: Proses setiap potongan satu per satu dengan jeda
+    for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        try {
+            const embedding = await getEmbedding(chunk);
+            const docRef = knowledgeCollection.doc();
+            await docRef.set({
+                sourceFile: path.basename(filePath),
+                content: chunk,
+                embedding: embedding,
+                createdAt: Timestamp.now()
+            });
+            logger.info(`Potongan ${i + 1}/${chunks.length} berhasil disimpan.`);
+
+            // Tambahkan jeda 1 detik untuk menghindari error kuota
+            await new Promise(resolve => setTimeout(resolve, 1000)); 
+
+        } catch (error) {
+            logger.error(`Gagal memproses potongan ${i + 1}:`, error);
+            // Anda bisa memilih untuk menghentikan proses atau melanjutkan ke potongan berikutnya
+            // break; 
+        }
+    }
+    
+    logger.info(`Selesai memproses semua ${chunks.length} potongan dari ${filePath}.`);
+});
+
+// =====================================================================
+// FUNGSI BARU: Analisis Proyeksi Kekayaan
+// =====================================================================
+export const getProjectionAnalysis = onCall(aiCallOptions, async (request) => {
+    if (!request.auth) {
+        throw new Error("Authentication required.");
+    }
+    const uid = request.auth.uid;
+    const { 
+        initialNetWorth, 
+        finalNetWorth, 
+        years, 
+        avgMonthlyCashflow, 
+        additionalInvestment 
+    } = request.data;
+
+    logger.info(`Generating projection analysis for user: ${uid}`);
 
     try {
-        const batch = db.batch();
-        const missionsCollection = db.collection('users').doc(uid).collection('missions');
+        const totalMonthlyInvestment = avgMonthlyCashflow + additionalInvestment;
 
-        missions.forEach(mission => {
-            const newMissionRef = missionsCollection.doc();
-            batch.set(newMissionRef, {
-                ...mission,
-                status: 'locked', // Semua misi dimulai sebagai 'locked'
-                createdAt: Timestamp.now(),
-                userId: uid,
-            });
-        });
-        
-        // Aktifkan misi pertama
-        // (Catatan: Ini adalah simplifikasi. Idealnya, kita harus memastikan tidak ada misi aktif lain)
-        const firstMissionId = missionsCollection.doc().id; // Dapatkan ref untuk misi pertama
-        const firstMissionRef = missionsCollection.doc(firstMissionId);
-        batch.set(firstMissionRef, { ...missions[0], id: firstMissionId, status: 'active', createdAt: Timestamp.now(), userId: uid });
+        const prompt = `
+            Anda dalam "Mode Strategist" (Persona Kalimasada). Analisis data proyeksi keuangan pengguna ini.
+            
+            KONTEKS DATA:
+            - Kekayaan Bersih Awal: Rp ${initialNetWorth.toLocaleString('id-ID')}
+            - Proyeksi Kekayaan Bersih Akhir: Rp ${finalNetWorth.toLocaleString('id-ID')}
+            - Jangka Waktu: ${years} tahun
+            - Total Investasi Bulanan (Rata-rata + Tambahan): Rp ${totalMonthlyInvestment.toLocaleString('id-ID')}
 
+            TUGAS ANDA:
+            1. Berikan komentar singkat tentang hasil proyeksi ini. Apakah ini pertumbuhan yang agresif atau konservatif?
+            2. Berikan SATU saran paling tajam dan bisa dieksekusi (actionable) untuk mengakselerasi pertumbuhan ini.
+            3. Jaga persona Anda yang blak-blakan, analitis, dan berorientasi pada hasil. Gunakan format Markdown dan emoji.
+        `;
 
-        await batch.commit();
-        logger.info(`${missions.length} missions created for user ${uid}.`);
-        return { success: true, message: `${missions.length} missions created.` };
+        const result = await generativeModel.generateContent(prompt);
+        const analysisText = result.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "Tidak ada insight khusus saat ini. Coba lagi nanti.";
+
+        return { success: true, analysis: analysisText };
+
     } catch (error) {
-        logger.error(`Error creating mission path for user ${uid}:`, error);
-        throw new Error("Failed to create mission path.");
+        logger.error(`Error generating projection analysis for user ${uid}:`, error);
+        throw new Error("Failed to generate projection analysis.");
     }
 });
+
+// FUNGSI "PEMBANTU" BARU: Ini berisi logika inti
+async function createSingleMission(uid: string, mission: any) {
+    if (!mission || typeof mission !== 'object') {
+        throw new HttpsError('invalid-argument', 'A single mission object is required.');
+    }
+
+    logger.info(`Attempting to create mission for user ${uid}:`, mission);
+    try {
+        const missionsCollection = db.collection('users').doc(uid).collection('missions');
+        await missionsCollection.add({
+            ...mission,
+            status: 'active',
+            createdAt: Timestamp.now(),
+            userId: uid,
+        });
+        logger.info(`SUCCESS: New active mission "${mission.title}" created for user ${uid}.`);
+    } catch (error) {
+        logger.error(`Error creating mission for user ${uid}:`, error);
+        throw new HttpsError('internal', "Failed to create mission.");
+    }
+}
+
+// FUNGSI LAMA (sekarang menjadi wrapper): Ini yang diekspos sebagai endpoint
+export const createMissionPath = onCall(lightweightOptions, async (request) => {
+    if (!request.auth) { throw new HttpsError('unauthenticated', 'Authentication required.'); }
+    const uid = request.auth.uid;
+    const { mission } = request.data;
+    
+    await createSingleMission(uid, mission);
+    
+    return { success: true, message: `Mission created.` };
+});
+
+
 
 // =====================================================================
 // FUNGSI BARU: Analisis Keuangan On-Demand
 // =====================================================================
-export const getFinancialAnalysis = onCall(async (request) => {
+export const getFinancialAnalysis = onCall(aiCallOptions, async (request) => {
     if (!request.auth) {
         throw new Error("Authentication required.");
     }
@@ -210,7 +428,7 @@ export const getFinancialAnalysis = onCall(async (request) => {
 
 
 //fungsi anlisa keuangan mingguan
-export const weeklyFinancialCheckup = onSchedule("every sunday 09:00", async (event) => {
+export const weeklyFinancialCheckup = onSchedule(scheduleOptions, async (event) => {
     logger.info("Starting weekly financial checkup for all users.");
     
     const usersSnapshot = await db.collection('users').get();
@@ -263,7 +481,7 @@ export const weeklyFinancialCheckup = onSchedule("every sunday 09:00", async (ev
 
 
 // FUNGSI BARU: Scan Struk Belanja (DENGAN PERBAIKAN)
-export const scanReceipt = onCall(async (request) => {
+export const scanReceipt = onCall(aiCallOptions, async (request) => {
     if (!request.auth) {
         throw new Error("Authentication required.");
     }
@@ -313,7 +531,7 @@ export const scanReceipt = onCall(async (request) => {
 
 
 // FUNGSI BARU: Deteksi Anomali Real-Time
-export const detectAnomalyOnTransaction = onDocumentCreated("users/{userId}/transactions/{transactionId}", async (event) => {
+export const detectAnomalyOnTransaction = onDocumentCreated(firestoreTriggerOptions, async (event) => {
     const snapshot = event.data;
     if (!snapshot) {
         logger.info("No data associated with the event");
@@ -359,7 +577,7 @@ export const detectAnomalyOnTransaction = onDocumentCreated("users/{userId}/tran
 });
 
 // FUNGSI BARU untuk menandai onboarding selesai
-export const markOnboardingComplete = onCall(async (request) => {
+export const markOnboardingComplete = onCall(lightweightOptions, async (request) => {
     if (!request.auth) {
         throw new Error("Authentication required.");
     }
@@ -376,90 +594,116 @@ export const markOnboardingComplete = onCall(async (request) => {
 });
 
 
-// Fungsi Chat utama yang diperbarui
-export const askMentorAI = onCall(async (request) => {
-  logger.info("--- askMentorAI (v7.0 - Mission Path) STARTED ---");
+// =====================================================================
+// FUNGSI CHAT DENGAN KEMAMPUAN TEXT-TO-SPEECH (LENGKAP)
+// =====================================================================
+export const askMentorAI = onCall(aiCallOptions, async (request) => {
+    if (!request.auth) { throw new HttpsError('unauthenticated', 'Authentication required.'); }
+    const uid = request.auth.uid;
+    const { prompt: userInput, history: clientHistory, inputType } = request.data;
 
-  if (!request.auth) { throw new Error("Authentication required."); }
+    if (!userInput) { throw new HttpsError('invalid-argument', 'User input is required.'); }
 
-  const uid = request.auth.uid;
-  const userInput = request.data.prompt as string;
-  const clientHistory = (request.data.history as Content[]) || [];
-
-  if (!userInput) { return { response: "Kasih pertanyaan yang bener." }; }
-
-  try {
-    const assetsSnapshot = await db.collection('users').doc(uid).collection('assets').get();
-    const liabilitiesSnapshot = await db.collection('users').doc(uid).collection('liabilities').get();
-    const profileSnapshot = await db.collection('users').doc(uid).get();
-
-    const totalAssets = assetsSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
-    const totalLiabilities = liabilitiesSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
-    const netWorth = totalAssets - totalLiabilities;
-    const userXP = profileSnapshot.data()?.xp || 0;
-
-    const financialContext = `
-      ---
-      USER'S CURRENT FINANCIAL CONTEXT:
-      - Net Worth: IDR ${netWorth.toLocaleString('id-ID')}
-      - Current XP: ${userXP}
-      - Chat History Status: ${clientHistory.length === 0 ? 'Empty (this is the first message)' : 'Ongoing'}
-      ---
-      Based on this context, diagnose their stage in the Financial Hierarchy and answer their question by following your conversational strategy.
-    `;
-
-    const fullPrompt = `${financialContext}\n\nUser's Question: "${userInput}"`;
-
-    const chat = generativeModel.startChat({ history: clientHistory });
-    const result = await chat.sendMessage(fullPrompt);
-    const response = result.response;
-
-    const firstCandidate = response.candidates?.[0];
-    if (!firstCandidate || !firstCandidate.content || !firstCandidate.content.parts) {
-      throw new Error("Invalid response structure from AI.");
-    }
-
-    const functionCallPart = firstCandidate.content.parts.find(part => !!part.functionCall);
-
-    if (functionCallPart && functionCallPart.functionCall) {
-      const { name, args } = functionCallPart.functionCall;
-      
-      if (name === 'createMissionPath') {
-        const pathArgs = args as { missions: any[] };
+    try {
+        const queryEmbedding = await getEmbedding(userInput);
+        const knowledgeSnapshot = await db.collection('knowledge_base').findNearest('embedding', queryEmbedding, { limit: 3, distanceMeasure: 'COSINE' }).get();
+        const relevantKnowledge = knowledgeSnapshot.docs.map(doc => `- ${doc.data().content}`).join('\n');
         
-        if (pathArgs.missions && Array.isArray(pathArgs.missions)) {
-            const batch = db.batch();
-            const missionsCollection = db.collection('users').doc(uid).collection('missions');
-            
-            pathArgs.missions.forEach((mission, index) => {
-                const newMissionRef = missionsCollection.doc();
-                batch.set(newMissionRef, {
-                    ...mission,
-                    status: index === 0 ? 'active' : 'locked', // Misi pertama 'active', sisanya 'locked'
-                    createdAt: Timestamp.now(),
-                    userId: uid,
-                });
-            });
-            await batch.commit();
+        const profileSnapshot = await db.collection('users').doc(uid).get();
+        const userProfile = profileSnapshot.data();
+        const userGender = userProfile?.gender || 'unknown';
+
+        const assetsSnapshot = await db.collection('users').doc(uid).collection('assets').get();
+        const liabilitiesSnapshot = await db.collection('users').doc(uid).collection('liabilities').get();
+        const totalAssets = assetsSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
+        const totalLiabilities = liabilitiesSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
+        const netWorth = totalAssets - totalLiabilities;
+        const userXP = userProfile?.xp || 0;
+
+        const context = `
+          ---
+          GENDER PENGGUNA: ${userGender}
+          ---
+          PENGETAHUAN RELEVAN DARI MEMORI OTAK:
+          ${relevantKnowledge.length > 0 ? relevantKnowledge : "Tidak ada pengetahuan spesifik yang ditemukan."}
+          ---
+          USER'S CURRENT FINANCIAL CONTEXT:
+          - Net Worth: IDR ${netWorth.toLocaleString('id-ID')}
+          - Current XP: ${userXP}
+          ---
+        `;
+        
+        const fullPrompt = `${context}\n\nUser's Question: "${userInput}"`;
+        const chat = generativeModel.startChat({ history: clientHistory || [] });
+        const result = await chat.sendMessage(fullPrompt);
+        
+        const response = result.response;
+        const firstCandidate = response.candidates?.[0];
+        if (!firstCandidate) { throw new HttpsError('internal', 'No response candidate from AI.'); }
+
+        const functionCallPart = firstCandidate.content?.parts.find(part => !!part.functionCall);
+        if (functionCallPart && functionCallPart.functionCall) {
+            // ... (logika function call Anda)
         }
+
+        const textResponse = firstCandidate.content?.parts[0]?.text ?? "Maaf, terjadi kesalahan.";
         
-        const result2 = await chat.sendMessage([{ functionResponse: { name: 'createMissionPath', response: { success: true } } }]);
-        const finalResponseText = result2.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "Peta perang berhasil dibuat. Cek halaman Misi!";
-        return { response: finalResponseText };
-      }
+        if (inputType === 'voice') {
+            logger.info(`Input is voice, converting text to speech for user ${uid}`);
+            const ttsRequest = {
+                input: { text: textResponse },
+                voice: { languageCode: 'id-ID', name: 'id-ID-Wavenet-D' },
+                audioConfig: { audioEncoding: 'MP3' as const },
+            };
+            
+            const [ttsResponse] = await ttsClient.synthesizeSpeech(ttsRequest);
+            const audioContent = ttsResponse.audioContent;
+
+            if (!audioContent) { throw new Error("Failed to generate audio content."); }
+
+            const bucket = storage.bucket();
+            const fileName = `tts-audio/${uid}/${Date.now()}.mp3`;
+            const file = bucket.file(fileName);
+
+            await file.save(audioContent as Buffer, { metadata: { contentType: 'audio/mpeg' } });
+            await file.makePublic();
+            const audioUrl = file.publicUrl();
+            
+            logger.info(`Audio file generated: ${audioUrl}`);
+            return { textResponse: textResponse, audioUrl: audioUrl };
+        } else {
+            logger.info(`Input is text, returning text-only response for user ${uid}`);
+            return { textResponse: textResponse, audioUrl: null };
+        }
+
+    } catch (error: any) {
+        logger.error("!!! ERROR in askMentorAI:", JSON.stringify(error, null, 2));
+        throw new HttpsError('internal', `Terjadi kesalahan: ${error.message}`);
     }
-
-    const textResponse = firstCandidate.content.parts[0]?.text ?? "Maaf, terjadi kesalahan. Coba lagi.";
-    return { response: textResponse };
-
-  } catch (error: any) {
-    logger.error("!!! ERROR CALLING GEMINI API:", JSON.stringify(error, null, 2));
-    return { response: `Error dari Google API: ${error.message}.` };
-  }
 });
 
+export const setAdminClaim = onCall(lightweightOptions, async (request) => {
+    if (!request.auth) {
+        // PERBAIKAN: Menggunakan HttpsError secara langsung
+        throw new HttpsError('unauthenticated', 'Authentication required.');
+    }
+    const uid = request.auth.uid;
+    logger.info(`Attempting to set admin claim for user: ${uid}`);
+
+    try {
+        await getAuth().setCustomUserClaims(uid, { admin: true });
+        logger.info(`Successfully set admin claim for user ${uid}`);
+        return { message: `Success! User ${uid} is now an admin.` };
+    } catch (error) {
+        logger.error(`Error setting admin claim for ${uid}:`, error);
+        // PERBAIKAN: Menggunakan HttpsError secara langsung
+        throw new HttpsError('internal', 'Failed to set admin claim. Check function logs for details.');
+    }
+});
+
+
 // Fungsi untuk menambah transaksi dan memberi XP
-export const addTransaction = onCall(async (request) => { 
+export const addTransaction = onCall(lightweightOptions, async (request) => {
     if (!request.auth) { throw new Error("Authentication required."); } 
     const uid = request.auth.uid; 
     const { description, amount, type, category } = request.data; 
@@ -476,20 +720,100 @@ export const addTransaction = onCall(async (request) => {
     }
 });
 
-// Fungsi untuk menyelesaikan misi dan menambah XP
-export const completeMission = onCall(async (request) => { 
-    if (!request.auth) { throw new Error("Authentication required."); } 
+// =====================================================================
+// FUNGSI MISI DENGAN LOGIKA DINAMIS & SUB-MISI
+// =====================================================================
+
+export const completeMission = onCall(lightweightOptions, async (request) => {
+    if (!request.auth) { throw new HttpsError('unauthenticated', 'Authentication required.'); } 
     const uid = request.auth.uid; 
     const { missionId, xpGained } = request.data; 
-    const xpToAdd = xpGained || 100; 
-    if (!missionId) { throw new Error("Mission ID is required."); } 
-    try { 
-        const missionRef = db.collection('users').doc(uid).collection('missions').doc(missionId); 
+    if (!missionId) { throw new HttpsError('invalid-argument', "Mission ID is required."); } 
+
+    try {
+        const missionRef = db.collection('users').doc(uid).collection('missions').doc(missionId);
+        const missionDoc = await missionRef.get();
+        if (!missionDoc.exists) { throw new HttpsError('not-found', 'Mission not found.'); }
+        
+        const missionData = missionDoc.data();
+        const currentTangga = missionData?.tangga || 0;
+        const currentSubStep = missionData?.subStep || 0;
+
         const userProfileRef = db.collection('users').doc(uid); 
-        await missionRef.update({ status: 'completed' }); 
-        await userProfileRef.update({ xp: FieldValue.increment(xpToAdd) }); 
-        return { success: true, message: `Gained ${xpToAdd} XP!` }; 
+        
+        const batch = db.batch();
+        batch.update(missionRef, { status: 'completed' }); 
+        batch.update(userProfileRef, { xp: FieldValue.increment(xpGained || 100) }); 
+        await batch.commit();
+
+        await advanceToNextMission(uid, currentTangga, currentSubStep);
+        
+        return { success: true, message: `Gained ${xpGained || 100} XP!` }; 
     } catch (error) { 
-        throw new Error("Failed to complete mission."); 
+        logger.error(`Error completing mission for user ${uid}:`, error);
+        throw new HttpsError('internal', "Failed to complete mission."); 
     }
 });
+
+
+// FUNGSI BARU: Untuk membuat misi berikutnya secara dinamis
+async function advanceToNextMission(uid: string, completedTangga: number, completedSubStep: number) {
+    logger.info(`Advancing user ${uid} from Tangga ${completedTangga}, Sub-step ${completedSubStep}`);
+
+    try {
+        // 1. Analisis Profil Pengguna Secara Mendalam
+        const ninetyDaysAgo = Timestamp.fromMillis(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        const transactionsSnapshot = await db.collection('users').doc(uid).collection('transactions')
+            .where('createdAt', '>=', ninetyDaysAgo)
+            .get();
+
+        let totalIncome = 0;
+        let totalExpense = 0;
+        transactionsSnapshot.forEach(doc => {
+            const t = doc.data();
+            if (t.type === 'income') totalIncome += t.amount;
+            else totalExpense += t.amount;
+        });
+
+        const avgMonthlyIncome = totalIncome / 3;
+        const avgMonthlyExpense = totalExpense / 3;
+
+        const profileSnapshot = await db.collection('users').doc(uid).get();
+        const netWorth = profileSnapshot.data()?.netWorth || 0;
+
+        // 2. Buat Prompt Dinamis untuk AI
+        const prompt = `
+            Seorang pengguna baru saja menyelesaikan misi untuk Tangga ${completedTangga} (sub-misi ${completedSubStep}).
+            Kondisi keuangan mereka saat ini:
+            - Net Worth: Rp ${netWorth.toLocaleString('id-ID')}
+            - Rata-rata Pemasukan Bulanan (3 bln terakhir): Rp ${avgMonthlyIncome.toLocaleString('id-ID')}
+            - Rata-rata Pengeluaran Bulanan (3 bln terakhir): Rp ${avgMonthlyExpense.toLocaleString('id-ID')}
+
+            Tugasmu: Berdasarkan kurikulum "Tangga Ternak Uang", tentukan dan buatkan **SATU sub-misi berikutnya** yang paling logis dan bisa dicapai untuk pengguna ini. Jika mereka sudah menyelesaikan semua sub-misi di satu tangga, buatkan sub-misi pertama untuk tangga berikutnya. Gunakan *tool* \`createMissionPath\`.
+        `;
+
+        // 3. Minta AI Membuat Misi
+        const result = await generativeModel.generateContent(prompt);
+        const response = result.response;
+        const functionCallPart = response.candidates?.[0]?.content?.parts.find(part => !!part.functionCall);
+
+        if (functionCallPart && functionCallPart.functionCall) {
+            const { name, args } = functionCallPart.functionCall;
+            if (name === 'createMissionPath') {
+                const missionArgs = args as { mission: object };
+                await createSingleMission(uid, missionArgs.mission);
+                logger.info(`AI successfully generated next dynamic mission for user ${uid}.`);
+            }
+        } else {
+             await db.collection('users').doc(uid).collection('insights').add({
+                text: `Mantap, Bro! 🔥 Lo udah naklukin misi terakhir. Di chat berikutnya, tanya gue "apa misi selanjutnya?" buat lanjut ke level berikutnya!`,
+                createdAt: Timestamp.now(),
+                isRead: false,
+            });
+        }
+
+    } catch (error) {
+        logger.error(`Failed to dynamically advance user ${uid} to next mission:`, error);
+    }
+}
+

@@ -1,0 +1,17 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "knowledge_base",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 1408,
+            "flat": {}
+          }
+        }
+      ]
+    }
+  ]
+}

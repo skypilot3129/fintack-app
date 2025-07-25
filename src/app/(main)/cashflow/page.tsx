@@ -1,22 +1,25 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, onSnapshot, query, Timestamp, orderBy } from 'firebase/firestore';
-// PERBAIKAN: Hapus 'HttpsCallableResult' yang tidak digunakan
+import { collection, onSnapshot, query, Timestamp, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import Button from '@/components/Button';
 import FinancialCharts from '@/components/FinancialCharts';
-import { Plus, TrendingDown, TrendingUp, Camera, Sparkles, X } from 'lucide-react';
+import CurrencyInput from '@/components/CurrencyInput';
+import TourHighlight from '@/components/TourHighlight';
+import CashflowPageSkeleton from '@/components/CashflowPageSkeleton'; // <-- Impor Skeleton
+import { Plus, TrendingDown, TrendingUp, Camera, Sparkles, X, Trash2, Pencil, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
+import React from 'react';
 
 // Tipe data untuk Transaksi
 interface Transaction {
-  id?: string;
+  id: string;
   description: string;
   amount: number;
   type: 'income' | 'expense';
@@ -24,43 +27,43 @@ interface Transaction {
   createdAt: Timestamp;
 };
 
-// PERBAIKAN: Hapus tipe data yang tidak digunakan
-// interface AddTransactionResponse { ... }
-// interface ScanReceiptResponse { ... }
-
-// Definisikan tipe untuk data hasil scan struk
 interface ScannedData {
     amount?: number;
     description?: string;
     category?: string;
 }
 
-// Tipe data untuk respons dari Cloud Function
 interface AnalysisResponse {
     success: boolean;
-    analysis: string;
+    analysis?: string;
 }
+
+type FilterType = 'all' | 'week' | 'month';
 
 export default function CashflowPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
-  
+
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState<Transaction | null>(null);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<'income' | 'expense'>('expense');
   const [category, setCategory] = useState('');
-  const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [isScanning, setIsScanning] = useState(false);
-
-  // State untuk fitur analisis
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<string | null>(null);
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  const [activeFilter, setActiveFilter] = useState<FilterType>('month');
+  const [searchTerm, setSearchTerm] = useState('');
+  
   useEffect(() => {
     if (!authLoading && !user) {
       router.push('/');
@@ -70,257 +73,333 @@ export default function CashflowPage() {
   useEffect(() => {
     if (user) {
       const q = query(collection(db, `users/${user.uid}/transactions`), orderBy('createdAt', 'desc'));
-      const unsubscribe = onSnapshot(q, (snap) => {
-        setTransactions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction)));
-        setLoading(false);
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setTransactions(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Transaction)));
+        setIsLoading(false);
       });
       return () => unsubscribe();
     }
   }, [user]);
 
-  const handleAddTransaction = async (e: React.FormEvent) => {
+  const filteredTransactions = useMemo(() => {
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    return transactions.filter(t => {
+      const transactionDate = t.createdAt.toDate();
+      
+      let dateFilterPassed = false;
+      if (activeFilter === 'all') {
+        dateFilterPassed = true;
+      } else if (activeFilter === 'week') {
+        dateFilterPassed = transactionDate >= oneWeekAgo;
+      } else if (activeFilter === 'month') {
+        dateFilterPassed = transactionDate >= firstDayOfMonth;
+      }
+
+      const searchTermLower = searchTerm.toLowerCase();
+      const searchFilterPassed = t.description.toLowerCase().includes(searchTermLower) || t.category.toLowerCase().includes(searchTermLower);
+
+      return dateFilterPassed && searchFilterPassed;
+    });
+  }, [transactions, activeFilter, searchTerm]);
+
+  const summary = useMemo(() => {
+    return filteredTransactions.reduce(
+      (acc, curr) => {
+        if (curr.type === 'income') acc.totalIncome += curr.amount;
+        else acc.totalExpense += curr.amount;
+        return acc;
+      },
+      { totalIncome: 0, totalExpense: 0 }
+    );
+  }, [filteredTransactions]);
+
+  const openModal = (transactionToEdit: Transaction | null = null) => {
+    if (transactionToEdit) {
+      setIsEditing(transactionToEdit);
+      setDescription(transactionToEdit.description);
+      setAmount(String(transactionToEdit.amount));
+      setType(transactionToEdit.type);
+      setCategory(transactionToEdit.category);
+    } else {
+      setIsEditing(null);
+      setDescription('');
+      setAmount('');
+      setType('expense');
+      setCategory('');
+    }
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => setIsModalOpen(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description || !amount || !category || !user) {
-        toast.error("Semua field harus diisi.");
-        return;
+    if (!user || !description || !amount || !category) {
+      toast.error('Semua field harus diisi, bro!');
+      return;
     }
     setIsSubmitting(true);
-    const formData = { description, amount, type, category };
-    
-    setDescription('');
-    setAmount('');
-    setCategory('');
-    setType('expense');
-    setShowForm(false);
+    const amountNumber = parseFloat(amount.replace(/[^0-9]/g, ''));
 
     try {
-        const functions = getFunctions();
-        const addTransaction = httpsCallable(functions, 'addTransaction');
-        const result = await addTransaction({
-            description: formData.description,
-            amount: parseFloat(formData.amount),
-            type: formData.type,
-            category: formData.category,
-        });
-        
-        // PERBAIKAN: Beri tipe spesifik pada result.data
-        const responseData = result.data as { success: boolean; message: string; };
-        toast.success(responseData.message || 'Transaksi berhasil! +5 XP');
-
+        if (isEditing) {
+            const transactionRef = doc(db, `users/${user.uid}/transactions`, isEditing.id);
+            await updateDoc(transactionRef, { description, amount: amountNumber, type, category });
+            toast.success('Transaksi berhasil diperbarui!');
+        } else {
+            const functions = getFunctions();
+            const addTransaction = httpsCallable(functions, 'addTransaction');
+            await addTransaction({ description, amount: amountNumber, type, category });
+            toast.success('Transaksi berhasil ditambah. +5 XP!');
+        }
+        closeModal();
     } catch (error) {
-        console.error("Gagal menambah transaksi:", error);
-        toast.error("Gagal menambah transaksi. Coba lagi nanti.");
+        console.error("Error submitting transaction:", error);
+        toast.error("Gagal menyimpan transaksi.");
     } finally {
         setIsSubmitting(false);
     }
   };
-  
-  const handleScanReceipt = async (event: React.ChangeEvent<HTMLInputElement>) => {
+
+  const handleDelete = async (id: string) => {
+    if (user && confirm("Yakin mau hapus transaksi ini?")) {
+        try {
+            await deleteDoc(doc(db, `users/${user.uid}/transactions`, id));
+            toast.success("Transaksi berhasil dihapus.");
+        // PERBAIKAN: Menghapus '(error)' yang tidak digunakan
+        } catch { 
+            toast.error("Gagal menghapus transaksi.");
+        }
+    }
+  }
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file || !user) return;
 
     setIsScanning(true);
-    const toastId = toast.loading('Menganalisis struk...');
+    const toastId = toast.loading('Memindai struk...');
 
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = async () => {
-        const base64String = (reader.result as string).split(',')[1];
-        
-        try {
+    try {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onloadend = async () => {
+            const base64String = (reader.result as string).split(',')[1];
             const functions = getFunctions();
-            const scanReceipt = httpsCallable(functions, 'scanReceipt');
-            const result = await scanReceipt({ 
-                imageB64: base64String,
-                mimeType: file.type 
-            });
+            const scanReceipt = httpsCallable<unknown, { success: boolean; data: ScannedData }>(functions, 'scanReceipt');
+            const result = await scanReceipt({ imageB64: base64String, mimeType: file.type });
 
-            // PERBAIKAN: Beri tipe spesifik pada result.data
-            const responseData = result.data as { success: boolean, data: ScannedData };
-            const { amount, description, category } = responseData.data;
-
-            if (amount) setAmount(amount.toString());
-            if (description) setDescription(description);
-            if (category) setCategory(category);
-            setType('expense');
-            setShowForm(true);
-
-            toast.success('Struk berhasil dibaca!', { id: toastId });
-
-        } catch (error) {
-            console.error("Gagal memindai struk:", error);
-            toast.error("Gagal memindai struk. Coba lagi.", { id: toastId });
-        } finally {
-            setIsScanning(false);
-        }
-    };
-    reader.onerror = () => {
-        toast.error("Gagal membaca file gambar.", { id: toastId });
+            if (result.data.success && result.data.data) {
+                const { amount, description, category } = result.data.data;
+                setAmount(amount ? String(amount) : '');
+                setDescription(description || '');
+                setCategory(category || '');
+                setType('expense');
+                setIsEditing(null);
+                setIsModalOpen(true);
+                toast.success('Data struk berhasil dipindai!', { id: toastId });
+            } else {
+                throw new Error('Gagal memindai data dari struk.');
+            }
+        };
+    } catch (error) {
+        console.error("Error scanning receipt:", error);
+        toast.error('Gagal memindai struk.', { id: toastId });
+    } finally {
         setIsScanning(false);
-    };
+        if(fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
-  const handleRequestAnalysis = async () => {
-    if (transactions.length === 0) {
-        toast.error("Catat dulu transaksinya, baru minta analisis!");
-        return;
-    }
-    setIsAnalyzing(true);
-    try {
-        const functions = getFunctions();
-        const getFinancialAnalysis = httpsCallable<object, AnalysisResponse>(functions, 'getFinancialAnalysis');
-        const result = await getFinancialAnalysis({ 
-            transactions: transactions.map(t => ({ amount: t.amount, type: t.type, category: t.category })) 
-        });
-        setAnalysisResult(result.data.analysis);
-        setShowAnalysisModal(true);
-    } catch (error) {
-        console.error("Gagal meminta analisis:", error);
-        toast.error("Gagal mendapatkan analisis dari AI.");
-    } finally {
-        setIsAnalyzing(false);
-    }
+  const handleAnalysis = async () => {
+      if (!user || filteredTransactions.length === 0) {
+          toast.error("Tidak ada data untuk dianalisis pada periode ini.");
+          return;
+      }
+      setIsAnalyzing(true);
+      const toastId = toast.loading('Meminta analisis dari mentor AI...');
+      try {
+          const functions = getFunctions();
+          const getFinancialAnalysis = httpsCallable<unknown, AnalysisResponse>(functions, 'getFinancialAnalysis');
+          const result = await getFinancialAnalysis({ transactions: filteredTransactions.slice(0, 50) });
+          
+          if (result.data.success && result.data.analysis) {
+              setAnalysisResult(result.data.analysis);
+              setShowAnalysisModal(true);
+              toast.success("Analisis selesai!", { id: toastId });
+          } else {
+              throw new Error("Gagal mendapatkan analisis.");
+          }
+      } catch (error) {
+          console.error("Error getting analysis:", error);
+          toast.error("Gagal mendapatkan analisis dari AI.", { id: toastId });
+      } finally {
+          setIsAnalyzing(false);
+      }
   };
 
   const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
-  
-  const cashFlowSummary = useMemo(() => {
-    return transactions.reduce((acc, curr) => {
-      if (curr.type === 'income') acc.totalIncome += curr.amount;
-      else acc.totalExpense += curr.amount;
-      acc.balance = acc.totalIncome - acc.totalExpense;
-      return acc;
-    }, { totalIncome: 0, totalExpense: 0, balance: 0 });
-  }, [transactions]);
 
-  if (authLoading || loading || !user) {
-    return <main className="flex min-h-screen items-center justify-center bg-[#0A0A0A] text-white"><p>Memuat data Laporan Intel...</p></main>;
+  // PERBAIKAN: Ganti teks loading dengan komponen skeleton
+  if (authLoading || isLoading || !user) {
+    return <CashflowPageSkeleton />;
   }
 
   return (
-    <main className="p-4 md:p-6 lg:p-8 bg-[#0A0A0A] pb-28 text-white">
-      <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-4">
-            <h1 className="text-3xl font-black uppercase text-[#A8FF00]">Laporan Intel</h1>
-            <p className="text-gray-400 mt-2">Analisis pergerakan uangmu untuk menemukan kebocoran dan peluang.</p>
-        </div>
-        
-        <div className="flex justify-center mb-8">
-            <Button onClick={handleRequestAnalysis} disabled={isAnalyzing} className="!w-auto">
-                <Sparkles className="mr-2" size={16} />
-                {isAnalyzing ? "Menganalisis..." : "Minta Analisis AI"}
-            </Button>
-        </div>
-        
-        <FinancialCharts transactions={transactions} />
+    <TourHighlight
+      tourId="cashflow"
+      title="Selamat Datang di Catatan Uang!"
+      description="Ini adalah pusat datamu. Catat semua pemasukan dan pengeluaran secara manual atau pakai fitur scan struk. Minta analisis dari AI untuk mendapatkan insight dari datamu."
+    >
+      <main className="p-4 md:p-6 lg:p-8 bg-[#0A0A0A] pb-28 text-white">
+        <div className="max-w-4xl mx-auto">
+          <h1 className="text-3xl font-black text-center uppercase text-[#A8FF00]">Catatan Uang</h1>
+          <p className="text-center text-gray-400 mt-2">Lacak pergerakan uangmu untuk mendapatkan laporan intelijen dari AI.</p>
+          
+          <div className="mt-8 flex flex-col items-center gap-4">
+              <Button onClick={handleAnalysis} disabled={isAnalyzing} className="w-full max-w-sm flex items-center justify-center gap-2 bg-gray-700 border-gray-700 text-white hover:bg-gray-600">
+                  <Sparkles size={18} /> {isAnalyzing ? 'Menganalisis...' : 'Minta Analisis dari Mentor'}
+              </Button>
+              <div className="flex flex-wrap justify-center items-center gap-4">
+                  <Button onClick={() => openModal()} className="flex items-center justify-center gap-2">
+                      <Plus size={18} /> Tambah Manual
+                  </Button>
+                  <Button onClick={() => fileInputRef.current?.click()} disabled={isScanning} className="flex items-center justify-center gap-2 bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white">
+                      <Camera size={18} /> {isScanning ? 'Memindai...' : 'Scan Struk'}
+                  </Button>
+              </div>
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
+          </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-8">
-          <motion.div whileHover={{ scale: 1.05 }} className="bg-gray-800 p-4 rounded-lg"><p className="text-sm text-gray-400">Total Pemasukan</p><p className="text-lg font-bold text-green-400">{formatCurrency(cashFlowSummary.totalIncome)}</p></motion.div>
-          <motion.div whileHover={{ scale: 1.05 }} className="bg-gray-800 p-4 rounded-lg"><p className="text-sm text-gray-400">Total Pengeluaran</p><p className="text-lg font-bold text-red-400">{formatCurrency(cashFlowSummary.totalExpense)}</p></motion.div>
-          <motion.div whileHover={{ scale: 1.05 }} className="bg-gray-800 p-4 rounded-lg"><p className="text-sm text-gray-400">Sisa Uang</p><p className={`text-lg font-bold ${cashFlowSummary.balance >= 0 ? 'text-white' : 'text-red-500'}`}>{formatCurrency(cashFlowSummary.balance)}</p></motion.div>
-        </div>
-
-        <div className="bg-[#121212] p-4 rounded-lg border border-gray-800">
-            <div className="flex justify-between items-center font-bold">
-                <button onClick={() => setShowForm(!showForm)} className="flex-grow flex justify-between items-center">
-                    <span>Tambah Transaksi Manual</span>
-                    <Plus size={20} className={`transition-transform duration-300 ${showForm ? 'rotate-45' : ''}`} />
-                </button>
-                <div className="border-l border-gray-700 ml-4 pl-4">
-                    <input 
-                        type="file" 
-                        accept="image/*"
-                        capture="environment"
-                        ref={fileInputRef}
-                        onChange={handleScanReceipt}
-                        className="hidden"
-                    />
-                    <Button 
-                        onClick={() => fileInputRef.current?.click()} 
-                        className="!w-auto !p-3"
-                        disabled={isScanning}
-                    >
-                        {isScanning ? 'Scanning...' : <Camera size={20} />}
-                    </Button>
-                </div>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+              <p className="text-sm text-gray-400">Total Pemasukan</p>
+              <p className="text-xl font-bold text-green-400">{formatCurrency(summary.totalIncome)}</p>
             </div>
-            
-            <AnimatePresence>
-              {showForm && (
-                  <motion.form 
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3 }}
-                    onSubmit={handleAddTransaction} 
-                    className="overflow-hidden grid grid-cols-1 md:grid-cols-2 gap-4 items-end"
-                  >
-                      <div className="mt-4"><label htmlFor="description" className="text-xs text-gray-400">Deskripsi</label><input id="description" type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Gaji bulanan, makan siang..." className="w-full bg-gray-800 rounded-lg px-4 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#A8FF00]"/></div>
-                      <div className="mt-4"><label htmlFor="amount" className="text-xs text-gray-400">Jumlah (Rp)</label><input id="amount" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="50000" className="w-full bg-gray-800 rounded-lg px-4 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#A8FF00]"/></div>
-                      <div className="mt-4"><label htmlFor="category" className="text-xs text-gray-400">Kategori</label><input id="category" type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Makanan, Gaji" className="w-full bg-gray-800 rounded-lg px-4 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#A8FF00]"/></div>
-                      <div className="flex items-center space-x-4 pt-6 mt-4"><div className="flex items-center"><input type="radio" id="expense" name="type" value="expense" checked={type === 'expense'} onChange={() => setType('expense')} className="form-radio h-4 w-4 text-[#A8FF00] bg-gray-700 border-gray-600 focus:ring-[#A8FF00]"/><label htmlFor="expense" className="ml-2 text-sm">Keluar</label></div><div className="flex items-center"><input type="radio" id="income" name="type" value="income" checked={type === 'income'} onChange={() => setType('income')} className="form-radio h-4 w-4 text-[#A8FF00] bg-gray-700 border-gray-600 focus:ring-[#A8FF00]"/><label htmlFor="income" className="ml-2 text-sm">Masuk</label></div></div>
-                      <div className="md:col-span-2"><Button type="submit" className="w-full" disabled={isSubmitting}>{isSubmitting ? 'Menyimpan...' : 'Tambah'}</Button></div>
-                  </motion.form>
-              )}
-            </AnimatePresence>
+            <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+              <p className="text-sm text-gray-400">Total Pengeluaran</p>
+              <p className="text-xl font-bold text-red-400">{formatCurrency(summary.totalExpense)}</p>
+            </div>
+            <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+              <p className="text-sm text-gray-400">Cash Flow</p>
+              <p className={`text-xl font-bold ${summary.totalIncome - summary.totalExpense >= 0 ? 'text-white' : 'text-red-500'}`}>
+                {formatCurrency(summary.totalIncome - summary.totalExpense)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-8">
+              <div className="flex flex-col sm:flex-row gap-4">
+                  <div className="relative flex-grow">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                      <input 
+                          type="text"
+                          placeholder="Cari deskripsi atau kategori..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="input-style w-full pl-10"
+                      />
+                  </div>
+                  <div className="flex-shrink-0 bg-[#121212] border border-gray-800 rounded-lg p-1 flex items-center space-x-1">
+                      {(['month', 'week', 'all'] as FilterType[]).map(filter => (
+                          <button 
+                              key={filter}
+                              onClick={() => setActiveFilter(filter)}
+                              className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${activeFilter === filter ? 'bg-[#A8FF00] text-black' : 'text-gray-400 hover:bg-gray-700'}`}
+                          >
+                              {filter === 'month' ? 'Bulan Ini' : filter === 'week' ? 'Minggu Ini' : 'Semua'}
+                          </button>
+                      ))}
+                  </div>
+              </div>
+          </div>
+
+          <div className="mt-6">
+              <h3 className="font-bold mb-4">Riwayat Transaksi</h3>
+              <div className="space-y-3">
+                  {filteredTransactions.length > 0 ? filteredTransactions.map((t) => (
+                      <div key={t.id} className="flex justify-between items-center bg-[#121212] p-3 rounded-lg border border-gray-800">
+                          <div className="flex items-center gap-3">
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.type === 'income' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                  {t.type === 'income' ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
+                              </div>
+                              <div>
+                                  <p className="font-semibold">{t.description}</p>
+                                  <p className="text-xs text-gray-400">{t.category} - {t.createdAt.toDate().toLocaleDateString('id-ID')}</p>
+                              </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                              <p className={`font-bold ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>
+                                  {formatCurrency(t.amount)}
+                              </p>
+                              <button onClick={() => openModal(t)} className="text-gray-500 hover:text-white"><Pencil size={16}/></button>
+                              <button onClick={() => handleDelete(t.id)} className="text-gray-500 hover:text-red-500"><Trash2 size={16}/></button>
+                          </div>
+                      </div>
+                  )) : (
+                      <div className="text-center py-10 bg-[#121212] rounded-lg border border-gray-800">
+                          <p className="text-gray-500">Tidak ada transaksi yang cocok dengan filter.</p>
+                      </div>
+                  )}
+              </div>
+          </div>
+          
+          <FinancialCharts transactions={filteredTransactions} />
         </div>
 
-        <div className="mt-8">
-          <h3 className="font-bold mb-4 text-lg">Transaksi Terakhir</h3>
-          <motion.ul className="space-y-3">
-            {transactions.map((t) => {
-              const Icon = t.type === 'income' ? TrendingUp : TrendingDown;
-              return (
-                <motion.li 
-                  key={t.id} 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5 }}
-                  whileHover={{ scale: 1.03, backgroundColor: '#374151' }}
-                  className="flex items-center bg-gray-800 p-3 rounded-lg"
-                >
-                    <div className={`mr-4 p-2 rounded-full ${t.type === 'income' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}><Icon size={20}/></div>
-                    <div className="flex-grow"><p className="font-semibold">{t.description}</p><p className="text-xs text-gray-400">{t.category}</p></div>
-                    <div className="text-right"><p className={`font-bold text-base ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>{t.type === 'expense' && '-'}{formatCurrency(t.amount)}</p><p className="text-xs text-gray-500">{t.createdAt.toDate().toLocaleDateString('id-ID')}</p></div>
-                </motion.li>
-              );
-            })}
-          </motion.ul>
-        </div>
-      </div>
-      
-      {/* Modal untuk menampilkan hasil analisis */}
-      <AnimatePresence>
-        {showAnalysisModal && (
-            <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/70 z-40 flex justify-center items-center p-4"
-                onClick={() => setShowAnalysisModal(false)}
-            >
-                <motion.div
-                    initial={{ scale: 0.95, y: 20 }}
-                    animate={{ scale: 1, y: 0 }}
-                    exit={{ scale: 0.95, y: 20 }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                    className="bg-[#18181B] border border-gray-700 shadow-2xl shadow-lime-500/10 rounded-lg w-full max-w-lg m-4 p-6 relative"
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-bold text-white">Hasil Analisis Intelijen</h3>
-                        <button onClick={() => setShowAnalysisModal(false)} className="text-gray-500 hover:text-white"><X size={20} /></button>
-                    </div>
-                    
-                    <div className="max-h-[60vh] overflow-y-auto pr-2">
-                        <div className="prose prose-sm prose-invert max-w-none text-gray-300">
-                            <ReactMarkdown>{analysisResult || ''}</ReactMarkdown>
-                        </div>
-                    </div>
-                </motion.div>
+        <AnimatePresence>
+          {isModalOpen && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/70 z-50 flex justify-center items-center p-4" onClick={closeModal}>
+              <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-[#18181B] border border-gray-700 rounded-lg w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+                <h2 className="text-lg font-bold mb-6">{isEditing ? 'Edit Transaksi' : 'Tambah Transaksi Baru'}</h2>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                      <button type="button" onClick={() => setType('expense')} className={`py-3 rounded-lg font-bold text-sm transition-colors ${type === 'expense' ? 'bg-red-500 text-white' : 'bg-gray-700 text-gray-300'}`}>Pengeluaran</button>
+                      <button type="button" onClick={() => setType('income')} className={`py-3 rounded-lg font-bold text-sm transition-colors ${type === 'income' ? 'bg-green-500 text-white' : 'bg-gray-700 text-gray-300'}`}>Pemasukan</button>
+                  </div>
+                  <div>
+                    <label htmlFor="amount" className="text-xs text-gray-400">Jumlah</label>
+                    <CurrencyInput value={amount} onChange={setAmount} placeholder="Rp 0" className="input-style w-full mt-1 text-lg" />
+                  </div>
+                  <div>
+                    <label htmlFor="description" className="text-xs text-gray-400">Deskripsi</label>
+                    <input id="description" type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Makan siang, Gaji, dll." className="input-style w-full mt-1" />
+                  </div>
+                  <div>
+                    <label htmlFor="category" className="text-xs text-gray-400">Kategori</label>
+                    <input id="category" type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Makanan, Transportasi, Gaji" className="input-style w-full mt-1" />
+                  </div>
+                  <div className="pt-4 flex space-x-3">
+                      <Button type="button" onClick={closeModal} className="bg-gray-600 border-gray-600 text-white hover:bg-gray-500">Batal</Button>
+                      <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Menyimpan...' : 'Simpan Transaksi'}</Button>
+                  </div>
+                </form>
+              </motion.div>
             </motion.div>
-        )}
-      </AnimatePresence>
-    </main>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showAnalysisModal && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/70 z-50 flex justify-center items-center p-4" onClick={() => setShowAnalysisModal(false)}>
+                  <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }} className="bg-[#18181B] border border-gray-700 shadow-2xl shadow-lime-500/10 rounded-lg w-full max-w-lg m-4 p-6 relative" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex justify-between items-center mb-4">
+                          <h3 className="text-lg font-bold text-white">Hasil Analisis Intelijen</h3>
+                          <button onClick={() => setShowAnalysisModal(false)} className="text-gray-500 hover:text-white"><X size={20} /></button>
+                      </div>
+                      <div className="max-h-[60vh] overflow-y-auto pr-2">
+                          <div className="prose prose-sm prose-invert max-w-none text-gray-300">
+                              <ReactMarkdown>{analysisResult || ''}</ReactMarkdown>
+                          </div>
+                      </div>
+                  </motion.div>
+              </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+    </TourHighlight>
   );
 }
