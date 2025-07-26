@@ -31,6 +31,29 @@ const lightweightOptions: CallableOptions = {
   memory: "256MiB" 
 };
 
+// --- OPSI BARU UNTUK FUNGSI TERJADWAL ANALISIS ---
+const analysisScheduleOptions: ScheduleOptions = { 
+  schedule: "every day 08:00", // Jalankan setiap jam 8 pagi
+  timeZone: "Asia/Jakarta",
+  cpu: 1, 
+  memory: "256MiB" // Alokasi memori sedikit lebih besar untuk proses batch
+};
+
+const gamificationScheduleOptions: ScheduleOptions = { 
+  schedule: "every day 07:00", // Jalankan setiap jam 7 pagi
+  timeZone: "Asia/Jakarta",
+  cpu: 1, 
+  memory: "256MiB"
+};
+
+// --- OPSI BARU UNTUK FUNGSI TERJADWAL HEALTH SCORE ---
+const healthScoreScheduleOptions: ScheduleOptions = { 
+  schedule: "every sunday 02:00", // Jalankan setiap Minggu jam 2 pagi
+  timeZone: "Asia/Jakarta",
+  cpu: 1, 
+  memory: "512MiB" // Butuh memori lebih untuk kalkulasi
+};
+
 // Opsi untuk fungsi yang memanggil AI (tetap ringan di server kita)
 const aiCallOptions: CallableOptions = { 
   cors: ["http://localhost:3000", "https://fintack.maseugene.com"], 
@@ -59,6 +82,7 @@ const heavyIngestionOptions: StorageOptions = {
 };
 
 // PERBARUAN UTAMA: Persona dengan "Ritme Percakapan" dan "Metode Sokratik"
+// --- PERBARUAN PADA SYSTEM PROMPT ---
 const personaText = `Anda adalah "Mas Eugene", seorang mentor keuangan AI yang sangat terpersonalisasi untuk aplikasi Fintack.
 
 **ATURAN PRIORITAS #0: PROTOKOL MEMORI OTAK (WAJIB DIIKUTI DULU!)**
@@ -68,17 +92,17 @@ const personaText = `Anda adalah "Mas Eugene", seorang mentor keuangan AI yang s
 
 ---
 
-**1. Persona Inti & Protokol Komunikasi Berdasarkan Gender (BARU & PENTING!)**
+**1. Persona Inti & Protokol Komunikasi Berdasarkan Gender (SUPER PENTING!)**
 
-Anda akan diberikan konteks GENDER PENGGUNA ('female', 'male', atau 'unknown'). Anda HARUS menyesuaikan gaya bicara Anda:
+Anda akan diberikan konteks GENDER PENGGUNA ('female', 'male', atau 'unknown'). Ini adalah aturan yang tidak bisa ditawar. Anda HARUS menyesuaikan gaya bicara Anda:
 
 * **Jika GENDER 'male' atau 'unknown':**
-    * **Gaya:** SANGAT PROVOKATIF dan blak-blakan (gaya Timothy Ronald). Panggil pengguna dengan "Bro".
-    * **Bahasa:** Gunakan kata-kata seperti "goblok", "boncos", "tancap gas". Tujuannya adalah untuk menantang dan memotivasi.
+    * **Gaya:** SANGAT PROVOKATIF dan blak-blakan (gaya Timothy Ronald). Panggil pengguna dengan namanya atau **"Bro"**.
+    * **Bahasa:** Gunakan kata-kata seperti "goblok", "tolol", "miskin", "boncos", "tancap gas". Tujuannya adalah untuk menantang dan memotivasi.
 
 * **Jika GENDER 'female':**
-    * **Gaya:** TETAP TEGAS dan to the point, tapi lebih suportif dan membimbing (gaya Kalimasada). Panggil pengguna dengan "Mbak" atau "Kak".
-    * **Bahasa:** Hindari kata "goblok". Ganti dengan frasa yang lebih lembut namun tetap menantang, seperti "Gimana sih?", "Ayo dong, fokus!", atau "Masa gitu aja nyerah?". Tujuannya adalah untuk memberdayakan, bukan memarahi.
+    * **Gaya:** TETAP TEGAS dan to the point, tapi lebih suportif dan membimbing (gaya Kalimasada). Panggil pengguna dengan **"Nona"** atau **"Kak"** atau **Tuan Putri**.
+    * **Bahasa:** Hindari kata "goblok" tapi kalau dia susah dibilangin, kamu boleh pakai gaya bahasa 'male' seperti "goblok", "tolol", "miskin". kalau tidak kamu harus Ganti dengan frasa yang lebih lembut namun tetap menantang, seperti "Gimana sih?", "Ayo dong, fokus!", atau "Masa gitu aja nyerah?". Tujuannya adalah untuk memberdayakan, bukan memarahi.
 
 * **Aturan Umum (berlaku untuk semua gender):**
     * **Format:** SELALU gunakan emoji (🚀, 💰, 🔥, 🧠, ❌, ✅, 🤔, 🧐) dan format jawaban dengan spasi baris dan judul tebal.
@@ -303,6 +327,450 @@ export const processKnowledgeFile = onObjectFinalized(heavyIngestionOptions, asy
     logger.info(`Selesai memproses semua ${chunks.length} potongan dari ${filePath}.`);
 });
 
+// --- FUNGSI BARU UNTUK FASE 1 ---
+
+/**
+ * Menganalisis transaksi harian untuk mendeteksi langganan dan tagihan rutin.
+ * Berjalan setiap hari pada jam 8 pagi.
+ */
+export const analyzeDailyTransactions = onSchedule(analysisScheduleOptions, async (event) => {
+    logger.info("Memulai analisis transaksi harian...");
+
+    const subscriptionKeywords = ['netflix', 'spotify', 'disney+', 'youtube premium', 'hbo', 'vidio'];
+    const billKeywords = ['pln', 'listrik', 'token', 'pdam', 'air', 'telkom', 'indihome', 'telkomsel', 'xl', 'axis', 'indosat', 'smartfren', 'cicilan', 'tagihan'];
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const startOfYesterday = new Date(yesterday.setHours(0, 0, 0, 0));
+    const endOfYesterday = new Date(yesterday.setHours(23, 59, 59, 999));
+
+    const usersSnapshot = await db.collection('users').get();
+    if (usersSnapshot.empty) {
+        logger.info("Tidak ada pengguna untuk dianalisis.");
+        return;
+    }
+
+    for (const userDoc of usersSnapshot.docs) {
+        const uid = userDoc.id;
+        const transactionsRef = db.collection('users').doc(uid).collection('transactions');
+        const recentTransactionsQuery = transactionsRef
+            .where('type', '==', 'expense')
+            .where('createdAt', '>=', Timestamp.fromDate(startOfYesterday))
+            .where('createdAt', '<=', Timestamp.fromDate(endOfYesterday));
+
+        const transactionsSnapshot = await recentTransactionsQuery.get();
+        if (transactionsSnapshot.empty) {
+            continue; // Lanjut ke pengguna berikutnya jika tidak ada transaksi
+        }
+
+        logger.info(`Menganalisis ${transactionsSnapshot.size} transaksi untuk pengguna ${uid}.`);
+
+        for (const transDoc of transactionsSnapshot.docs) {
+            const transaction = transDoc.data();
+            const description = transaction.description.toLowerCase();
+            let tag = null;
+            let insightText = null;
+
+            // Cek apakah ini langganan
+            if (subscriptionKeywords.some(keyword => description.includes(keyword))) {
+                tag = 'subscription';
+                insightText = `💡 Gue deteksi ada pembayaran langganan untuk "${transaction.description}". Pastiin ini masih lo pake ya, jangan buang-buang duit!`;
+            } 
+            // Cek apakah ini tagihan
+            else if (billKeywords.some(keyword => description.includes(keyword))) {
+                tag = 'bill';
+                insightText = `🧾 Tagihan untuk "${transaction.description}" sebesar Rp ${transaction.amount.toLocaleString('id-ID')} udah tercatat. Aman!`;
+            }
+
+            // Jika ada tag yang terdeteksi, update dokumen dan buat insight
+            if (tag) {
+                try {
+                    await transDoc.ref.update({ tag: tag });
+                    await db.collection('users').doc(uid).collection('insights').add({
+                        text: insightText,
+                        createdAt: Timestamp.now(),
+                        isRead: false,
+                    });
+                    logger.info(`Transaksi ${transDoc.id} ditandai sebagai '${tag}' untuk pengguna ${uid}.`);
+                } catch (error) {
+                    logger.error(`Gagal memproses transaksi ${transDoc.id} untuk pengguna ${uid}:`, error);
+                }
+            }
+        }
+    }
+
+    logger.info("Analisis transaksi harian selesai.");
+});
+
+// --- FUNGSI BARU UNTUK FASE 1: BUDGETING CERDAS ---
+
+/**
+ * Menganalisis transaksi 30 hari terakhir dan membuat rekomendasi budget awal.
+ */
+export const setupInitialBudgets = onCall(lightweightOptions, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'Authentication required.');
+    }
+    const uid = request.auth.uid;
+    logger.info(`Memulai setup budget awal untuk pengguna: ${uid}`);
+
+    const thirtyDaysAgo = Timestamp.fromMillis(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const currentMonthStr = new Date().toISOString().slice(0, 7); // Format: YYYY-MM
+
+    const transactionsSnapshot = await db.collection('users').doc(uid).collection('transactions')
+        .where('type', '==', 'expense')
+        .where('createdAt', '>=', thirtyDaysAgo)
+        .get();
+
+    if (transactionsSnapshot.empty) {
+        logger.info(`Pengguna ${uid} tidak punya transaksi, tidak ada budget yang dibuat.`);
+        return { success: true, message: "Tidak ada data transaksi untuk dianalisis." };
+    }
+
+    const spendingByCategory: { [key: string]: number } = {};
+    transactionsSnapshot.forEach(doc => {
+        const t = doc.data();
+        spendingByCategory[t.category] = (spendingByCategory[t.category] || 0) + t.amount;
+    });
+
+    const batch = db.batch();
+    for (const category in spendingByCategory) {
+        const budgetAmount = spendingByCategory[category];
+        const budgetRef = db.collection('users').doc(uid).collection('budgets').doc(`${currentMonthStr}_${category}`);
+        
+        batch.set(budgetRef, {
+            categoryName: category,
+            budgetedAmount: budgetAmount,
+            spentAmount: 0, // Awalnya 0 untuk bulan baru
+            month: currentMonthStr,
+            createdAt: Timestamp.now(),
+        });
+    }
+
+    await batch.commit();
+    logger.info(`Berhasil membuat ${Object.keys(spendingByCategory).length} budget awal untuk pengguna ${uid}.`);
+    return { success: true, message: "Rekomendasi budget berhasil dibuat!" };
+});
+
+/**
+ * Memicu setiap kali transaksi baru dibuat, untuk mengupdate budget yang sesuai.
+ */
+export const updateBudgetOnTransaction = onDocumentCreated(firestoreTriggerOptions, async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) { return; }
+
+    const transaction = snapshot.data();
+    const uid = event.params.userId;
+
+    if (transaction.type !== 'expense') {
+        return; // Hanya proses pengeluaran
+    }
+
+    const transactionMonth = (transaction.createdAt as Timestamp).toDate().toISOString().slice(0, 7);
+    const budgetId = `${transactionMonth}_${transaction.category}`;
+    const budgetRef = db.collection('users').doc(uid).collection('budgets').doc(budgetId);
+
+    try {
+        const budgetDoc = await budgetRef.get();
+        if (!budgetDoc.exists) {
+            logger.info(`Tidak ada budget ditemukan untuk kategori "${transaction.category}" bulan ${transactionMonth} untuk pengguna ${uid}.`);
+            return;
+        }
+
+        const budgetData = budgetDoc.data();
+        if (!budgetData) return;
+
+        // Update jumlah yang sudah dibelanjakan
+        await budgetRef.update({ spentAmount: FieldValue.increment(transaction.amount) });
+
+        // Cek apakah budget hampir habis dan perlu notifikasi
+        const newSpentAmount = budgetData.spentAmount + transaction.amount;
+        const budgetUsage = (newSpentAmount / budgetData.budgetedAmount) * 100;
+
+        // Kirim insight jika penggunaan > 80% dan belum pernah dikirim sebelumnya
+        if (budgetUsage > 80 && !budgetData.warningSent) {
+            const insightText = `🔥 PERINGATAN! Budget lo buat "${transaction.category}" udah kepake ${Math.round(budgetUsage)}%. Rem pengeluaran lo sekarang juga!`;
+            await db.collection('users').doc(uid).collection('insights').add({
+                text: insightText,
+                createdAt: Timestamp.now(),
+                isRead: false,
+            });
+            // Tandai agar tidak mengirim notifikasi yang sama berulang kali
+            await budgetRef.update({ warningSent: true });
+            logger.info(`Mengirim peringatan budget untuk pengguna ${uid} kategori ${transaction.category}.`);
+        }
+
+    } catch (error) {
+        logger.error(`Gagal mengupdate budget untuk pengguna ${uid}:`, error);
+    }
+});
+
+// --- FUNGSI BARU UNTUK FASE 1: GAMIFIKASI & NUDGES ---
+
+/**
+ * Definisi Lencana (Badges) yang tersedia.
+ */
+const badges = {
+    BEGINNER_LOGGER: {
+        id: 'BEGINNER_LOGGER',
+        name: 'Pencatat Pemula',
+        description: 'Mencatat transaksi pertamamu.',
+        insight: '🏆 Lencana "Pencatat Pemula" kebuka! Langkah pertama selalu yang paling berat, dan lo udah lewatin itu. Terus catat, jangan kendor!'
+    },
+    FIRST_PLANNER: {
+        id: 'FIRST_PLANNER',
+        name: 'Perencana Pertama',
+        description: 'Membuat budget pertamamu.',
+        insight: '🏆 Lencana "Perencana Pertama" buat lo! Sekarang lo bukan cuma ngikutin arus, tapi lo yang ngatur arusnya. Keren!'
+    },
+    THE_ALCHEMIST: {
+        id: 'THE_ALCHEMIST',
+        name: 'Sang Alkemis',
+        description: 'Mencapai Kekayaan Bersih (Net Worth) positif untuk pertama kalinya.',
+        insight: '🏆 GILA! Lencana "Sang Alkemis" berhasil lo dapetin! Lo udah berhasil ngubah "utang" jadi "aset". Ini titik balik besar, Bro/Mbak. Bangga gue!'
+    }
+};
+
+/**
+ * Memberikan lencana (badges) kepada pengguna berdasarkan pencapaian mereka.
+ * Berjalan setiap hari pada jam 7 pagi.
+ */
+export const awardBehavioralBadges = onSchedule(gamificationScheduleOptions, async (event) => {
+    logger.info("Memulai proses pemberian lencana harian...");
+
+    const usersSnapshot = await db.collection('users').get();
+    if (usersSnapshot.empty) {
+        logger.info("Tidak ada pengguna untuk diproses.");
+        return;
+    }
+
+    for (const userDoc of usersSnapshot.docs) {
+        const uid = userDoc.id;
+        // const userProfile = userDoc.data(); // <-- DIHAPUS: Baris ini yang menyebabkan peringatan.
+        const userBadgesRef = db.collection('users').doc(uid).collection('badges');
+        const userBadgesSnapshot = await userBadgesRef.get();
+        const earnedBadgeIds = userBadgesSnapshot.docs.map(doc => doc.id);
+
+        // --- Cek Lencana: Pencatat Pemula ---
+        if (!earnedBadgeIds.includes(badges.BEGINNER_LOGGER.id)) {
+            const transactionsSnapshot = await db.collection('users').doc(uid).collection('transactions').limit(1).get();
+            if (!transactionsSnapshot.empty) {
+                await awardBadge(uid, badges.BEGINNER_LOGGER);
+            }
+        }
+
+        // --- Cek Lencana: Perencana Pertama ---
+        if (!earnedBadgeIds.includes(badges.FIRST_PLANNER.id)) {
+            const budgetsSnapshot = await db.collection('users').doc(uid).collection('budgets').limit(1).get();
+            if (!budgetsSnapshot.empty) {
+                await awardBadge(uid, badges.FIRST_PLANNER);
+            }
+        }
+        
+        // --- Cek Lencana: Sang Alkemis ---
+        if (!earnedBadgeIds.includes(badges.THE_ALCHEMIST.id)) {
+            // Kita asumsikan net worth dihitung dan disimpan di profil pengguna
+            const assetsSnapshot = await db.collection('users').doc(uid).collection('assets').get();
+            const liabilitiesSnapshot = await db.collection('users').doc(uid).collection('liabilities').get();
+            const totalAssets = assetsSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
+            const totalLiabilities = liabilitiesSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
+            const netWorth = totalAssets - totalLiabilities;
+
+            if (netWorth > 0) {
+                await awardBadge(uid, badges.THE_ALCHEMIST);
+            }
+        }
+    }
+
+    logger.info("Proses pemberian lencana harian selesai.");
+});
+
+/**
+ * Helper function untuk menyimpan lencana dan membuat insight.
+ */
+async function awardBadge(uid: string, badge: { id: string; name: string; insight: string; }) {
+    try {
+        // Simpan lencana ke sub-koleksi
+        await db.collection('users').doc(uid).collection('badges').doc(badge.id).set({
+            name: badge.name,
+            earnedAt: Timestamp.now()
+        });
+
+        // Kirim insight notifikasi ke pengguna
+        await db.collection('users').doc(uid).collection('insights').add({
+            text: badge.insight,
+            createdAt: Timestamp.now(),
+            isRead: false,
+        });
+        logger.info(`Lencana "${badge.name}" diberikan kepada pengguna ${uid}.`);
+    } catch (error) {
+        logger.error(`Gagal memberikan lencana "${badge.name}" kepada pengguna ${uid}:`, error);
+    }
+}
+
+// --- FUNGSI BARU UNTUK FASE 1: FINANCIAL HEALTH SCORE ---
+
+/**
+ * Menghitung Financial Health Score untuk semua pengguna.
+ * Berjalan setiap minggu pada Minggu jam 2 pagi.
+ */
+export const calculateFinancialHealthScore = onSchedule(healthScoreScheduleOptions, async (event) => {
+    logger.info("Memulai kalkulasi Financial Health Score mingguan...");
+
+    const usersSnapshot = await db.collection('users').get();
+    if (usersSnapshot.empty) {
+        logger.info("Tidak ada pengguna untuk diproses.");
+        return;
+    }
+
+    for (const userDoc of usersSnapshot.docs) {
+        const uid = userDoc.id;
+        try {
+            // --- 1. Data Gathering ---
+            const ninetyDaysAgo = Timestamp.fromMillis(Date.now() - 90 * 24 * 60 * 60 * 1000);
+            
+            // Aset & Liabilitas
+            const assetsSnapshot = await db.collection('users').doc(uid).collection('assets').get();
+            const liabilitiesSnapshot = await db.collection('users').doc(uid).collection('liabilities').get();
+            const totalAssets = assetsSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
+            const totalLiabilities = liabilitiesSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
+            const netWorth = totalAssets - totalLiabilities;
+            const emergencyFund = assetsSnapshot.docs
+                .filter(doc => doc.data().category === 'Tabungan' || doc.data().category === 'Dana Darurat')
+                .reduce((sum, doc) => sum + (doc.data().value || 0), 0);
+
+            // Transaksi 90 hari terakhir
+            const transactionsSnapshot = await db.collection('users').doc(uid).collection('transactions')
+                .where('createdAt', '>=', ninetyDaysAgo).get();
+            let totalIncome = 0;
+            let totalExpense = 0;
+            transactionsSnapshot.forEach(doc => {
+                const t = doc.data();
+                if (t.type === 'income') totalIncome += t.amount;
+                else totalExpense += t.amount;
+            });
+            const avgMonthlyExpense = totalExpense / 3;
+
+            // Kepatuhan Budget bulan lalu
+            const lastMonth = new Date();
+            lastMonth.setMonth(lastMonth.getMonth() - 1);
+            const lastMonthStr = lastMonth.toISOString().slice(0, 7);
+            const budgetsSnapshot = await db.collection('users').doc(uid).collection('budgets').where('month', '==', lastMonthStr).get();
+            let overspentBudgets = 0;
+            budgetsSnapshot.forEach(doc => {
+                const b = doc.data();
+                if (b.spentAmount > b.budgetedAmount) overspentBudgets++;
+            });
+            
+            // --- 2. Scoring Logic (Total 1000 poin) ---
+            // Skor Kekayaan Bersih (Maks 350)
+            let netWorthScore = Math.max(0, 50 + (netWorth / 1000000)); // 1 poin per juta, mulai dari 50
+            netWorthScore = Math.min(netWorthScore, 350);
+
+            // Skor Tingkat Tabungan (Maks 300)
+            const savingsRate = totalIncome > 0 ? (totalIncome - totalExpense) / totalIncome : 0;
+            let savingsRateScore = Math.max(0, savingsRate * 1000); // 10% = 100 poin
+            savingsRateScore = Math.min(savingsRateScore, 300);
+
+            // Skor Dana Darurat (Maks 200)
+            const emergencyCoverageMonths = avgMonthlyExpense > 0 ? emergencyFund / avgMonthlyExpense : 0;
+            let emergencyFundScore = (emergencyCoverageMonths / 6) * 200; // Target 6 bulan = 200 poin
+            emergencyFundScore = Math.min(emergencyFundScore, 200);
+
+            // Skor Kepatuhan Budget (Maks 150)
+            const totalBudgets = budgetsSnapshot.size;
+            const budgetAdherence = totalBudgets > 0 ? (totalBudgets - overspentBudgets) / totalBudgets : 1;
+            const budgetAdherenceScore = budgetAdherence * 150;
+
+            const totalScore = Math.round(netWorthScore + savingsRateScore + emergencyFundScore + budgetAdherenceScore);
+
+            // --- 3. Save to Profile ---
+            const scoreData = {
+                total: totalScore,
+                netWorth: { score: Math.round(netWorthScore), value: netWorth },
+                savingsRate: { score: Math.round(savingsRateScore), value: savingsRate },
+                emergencyFund: { score: Math.round(emergencyFundScore), value: emergencyCoverageMonths },
+                budgetAdherence: { score: Math.round(budgetAdherenceScore), value: budgetAdherence },
+                lastCalculated: Timestamp.now()
+            };
+            
+            await db.collection('users').doc(uid).update({ financialHealthScore: scoreData });
+            logger.info(`Financial Health Score (${totalScore}) berhasil dihitung untuk pengguna ${uid}.`);
+
+        } catch(error) {
+            logger.error(`Gagal menghitung FHS untuk pengguna ${uid}:`, error);
+        }
+    }
+});
+
+// --- FUNGSI getStockPrice DIUBAH TOTAL UNTUK MENGGUNAKAN ALPHA VANTAGE ---
+
+/**
+ * Mengambil harga saham terbaru dari API Alpha Vantage.
+ * Untuk pasar Indonesia, kita tambahkan suffix ".JK".
+ */
+export const getStockPrice = onCall(lightweightOptions, async (request) => {
+    const { ticker } = request.data;
+    if (!ticker || typeof ticker !== 'string') {
+        throw new HttpsError('invalid-argument', 'Ticker saham wajib diisi.');
+    }
+
+    // --- PASTIKAN API KEY ANDA SUDAH BENAR DI SINI ---
+    const ALPHA_VANTAGE_API_KEY = "TIFXIPOT2AQJZXQZ"; 
+
+    const formattedTicker = ticker.toUpperCase().endsWith('.JK') 
+        ? ticker.toUpperCase() 
+        : `${ticker.toUpperCase()}.JK`;
+    
+    // PERUBAHAN UTAMA: Menggunakan TIME_SERIES_DAILY dengan outputsize=compact
+    const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${formattedTicker}&outputsize=compact&apikey=${ALPHA_VANTAGE_API_KEY}`;
+    
+    logger.info(`Mencoba mengambil data dari Alpha Vantage (Daily) untuk: ${formattedTicker}`);
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            logger.error(`Alpha Vantage API request gagal dengan status ${response.status}.`);
+            throw new Error(`API request failed with status ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Cek jika ada pesan error atau rate limit dari API
+        if (data.Note || data["Error Message"]) {
+            logger.warn(`Respons tidak valid dari Alpha Vantage: ${JSON.stringify(data)}`);
+            throw new HttpsError('not-found', `Gagal mengambil data untuk ${ticker.toUpperCase()}. Mungkin karena limit API gratis atau kode salah.`);
+        }
+        
+        // PERUBAHAN LOGIKA PARSING: Mengambil data dari time series
+        const timeSeries = data['Time Series (Daily)'];
+        if (!timeSeries) {
+            throw new HttpsError('not-found', `Tidak ada data time series untuk saham ${ticker.toUpperCase()}.`);
+        }
+
+        // Ambil tanggal terbaru (kunci pertama dari objek time series)
+        const latestDate = Object.keys(timeSeries)[0];
+        if (!latestDate) {
+            throw new HttpsError('not-found', `Tidak ada data tanggal yang tersedia untuk ${ticker.toUpperCase()}.`);
+        }
+
+        // Ambil harga penutupan (close price) dari tanggal terbaru
+        const priceString = timeSeries[latestDate]['4. close'];
+        if (!priceString) {
+             throw new HttpsError('not-found', `Tidak bisa menemukan harga penutupan untuk saham ${ticker.toUpperCase()}.`);
+        }
+
+        const price = parseFloat(priceString);
+        logger.info(`Harga penutupan terakhir untuk ${ticker.toUpperCase()} adalah: ${price}`);
+        return { success: true, price: price };
+
+    } catch (error: any) {
+        logger.error(`Gagal mengambil harga saham untuk ${ticker}:`, error);
+        if (error.code === 'not-found') throw error;
+        throw new HttpsError('internal', 'Gagal terhubung ke layanan data saham.');
+    }
+});
+
 // =====================================================================
 // FUNGSI BARU: Analisis Proyeksi Kekayaan
 // =====================================================================
@@ -350,12 +818,11 @@ export const getProjectionAnalysis = onCall(aiCallOptions, async (request) => {
     }
 });
 
-// FUNGSI "PEMBANTU" BARU: Ini berisi logika inti
+// Fungsi helper untuk membuat misi
 async function createSingleMission(uid: string, mission: any) {
     if (!mission || typeof mission !== 'object') {
         throw new HttpsError('invalid-argument', 'A single mission object is required.');
     }
-
     logger.info(`Attempting to create mission for user ${uid}:`, mission);
     try {
         const missionsCollection = db.collection('users').doc(uid).collection('missions');
@@ -593,10 +1060,47 @@ export const markOnboardingComplete = onCall(lightweightOptions, async (request)
     }
 });
 
+// --- FUNGSI BARU UNTUK UPDATE PROFIL PENGGUNA ---
+export const updateUserProfile = onCall(lightweightOptions, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'Authentication required.');
+    }
+    const uid = request.auth.uid;
+    const { gender } = request.data;
 
-// =====================================================================
-// FUNGSI CHAT DENGAN KEMAMPUAN TEXT-TO-SPEECH (LENGKAP)
-// =====================================================================
+    if (gender !== 'male' && gender !== 'female') {
+        throw new HttpsError('invalid-argument', 'Gender must be either "male" or "female".');
+    }
+
+    try {
+        const userProfileRef = db.collection('users').doc(uid);
+        await userProfileRef.set({ gender: gender }, { merge: true });
+        logger.info(`User ${uid} has set their gender to ${gender}.`);
+        return { success: true };
+    } catch (error) {
+        logger.error(`Error updating profile for user ${uid}:`, error);
+        throw new HttpsError('internal', 'Failed to update user profile.');
+    }
+});
+
+
+// Fungsi helper baru untuk membersihkan Markdown
+function stripMarkdown(text: string): string {
+    return text
+        // Hapus bold (**) dan italic (*)
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        // Hapus heading (#)
+        .replace(/#+\s/g, '')
+        // Hapus list items (*, -, +)
+        .replace(/^[*\-+] /gm, '')
+        // Hapus link markdown, tapi pertahankan teksnya
+        .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+        // Hapus gambar markdown
+        .replace(/!\[.*?\]\(.*?\)/g, '');
+}
+
+// --- FUNGSI askMentorAI DENGAN PERBAIKAN LOGIKA FUNCTION CALL ---
 export const askMentorAI = onCall(aiCallOptions, async (request) => {
     if (!request.auth) { throw new HttpsError('unauthenticated', 'Authentication required.'); }
     const uid = request.auth.uid;
@@ -605,6 +1109,7 @@ export const askMentorAI = onCall(aiCallOptions, async (request) => {
     if (!userInput) { throw new HttpsError('invalid-argument', 'User input is required.'); }
 
     try {
+        // Langkah-langkah pengambilan konteks (RAG, profil, dll) tidak berubah
         const queryEmbedding = await getEmbedding(userInput);
         const knowledgeSnapshot = await db.collection('knowledge_base').findNearest('embedding', queryEmbedding, { limit: 3, distanceMeasure: 'COSINE' }).get();
         const relevantKnowledge = knowledgeSnapshot.docs.map(doc => `- ${doc.data().content}`).join('\n');
@@ -635,30 +1140,64 @@ export const askMentorAI = onCall(aiCallOptions, async (request) => {
         
         const fullPrompt = `${context}\n\nUser's Question: "${userInput}"`;
         const chat = generativeModel.startChat({ history: clientHistory || [] });
-        const result = await chat.sendMessage(fullPrompt);
+        const result1 = await chat.sendMessage(fullPrompt); // Langkah 1
         
-        const response = result.response;
-        const firstCandidate = response.candidates?.[0];
-        if (!firstCandidate) { throw new HttpsError('internal', 'No response candidate from AI.'); }
+        const response1 = result1.response;
+        const candidate1 = response1.candidates?.[0];
+        if (!candidate1) { throw new HttpsError('internal', 'No response candidate from AI.'); }
 
-        const functionCallPart = firstCandidate.content?.parts.find(part => !!part.functionCall);
+        const functionCallPart = candidate1.content?.parts.find(part => !!part.functionCall);
+
+        // --- PERBAIKAN UTAMA DIMULAI DI SINI ---
         if (functionCallPart && functionCallPart.functionCall) {
-            // ... (logika function call Anda)
-        }
+            logger.info("Function call detected:", JSON.stringify(functionCallPart.functionCall));
+            
+            const { name, args } = functionCallPart.functionCall;
+            if (name === 'createMissionPath') {
+                const missionArgs = args as { mission: object };
+                
+                try {
+                    // Eksekusi fungsi yang diminta
+                    await createSingleMission(uid, missionArgs.mission);
+                    
+                    // Langkah 2: Kirim hasil eksekusi kembali ke model
+                    const functionResponse: Part = {
+                        functionResponse: {
+                            name: 'createMissionPath',
+                            response: { success: true, message: 'Misi berhasil dibuat.' }
+                        }
+                    };
+                    
+                    const result2 = await chat.sendMessage([functionResponse]);
+                    const response2 = result2.response;
+                    const finalResponseText = response2.candidates?.[0]?.content?.parts?.[0]?.text ?? "Misi baru buat lo udah gue siapkan.";
 
-        const textResponse = firstCandidate.content?.parts[0]?.text ?? "Maaf, terjadi kesalahan.";
+                    // Kembalikan respons teks akhir dari AI setelah fungsi dieksekusi
+                    return { textResponse: finalResponseText, audioUrl: null };
+
+                } catch (error) {
+                    logger.error("Error executing createSingleMission:", error);
+                    throw new HttpsError('internal', 'Gagal membuat misi di database.');
+                }
+            }
+        }
+        // --- AKHIR PERBAIKAN ---
+
+        // Jika tidak ada function call, lanjutkan seperti biasa
+        const textResponse = candidate1.content?.parts[0]?.text ?? "Maaf, terjadi kesalahan.";
         
         if (inputType === 'voice') {
+            // Logika Text-to-Speech tidak berubah
             logger.info(`Input is voice, converting text to speech for user ${uid}`);
+            const cleanTextForSpeech = stripMarkdown(textResponse);
             const ttsRequest = {
-                input: { text: textResponse },
-                voice: { languageCode: 'id-ID', name: 'id-ID-Wavenet-D' },
+                input: { text: cleanTextForSpeech },
+                voice: { languageCode: 'id-ID', name: 'id-ID-Chirp3-HD-Algieba' }, 
                 audioConfig: { audioEncoding: 'MP3' as const },
             };
             
             const [ttsResponse] = await ttsClient.synthesizeSpeech(ttsRequest);
             const audioContent = ttsResponse.audioContent;
-
             if (!audioContent) { throw new Error("Failed to generate audio content."); }
 
             const bucket = storage.bucket();

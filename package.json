@@ -19,7 +19,8 @@
     "react-dom": "^19.0.0",
     "react-hot-toast": "^2.5.2",
     "react-markdown": "^10.1.0",
-    "recharts": "^3.0.2"
+    "recharts": "^3.0.2",
+    "zustand": "^5.0.6"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

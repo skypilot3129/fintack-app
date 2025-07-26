@@ -1,159 +1,173 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, onSnapshot, query, doc, deleteDoc, orderBy, Timestamp } from 'firebase/firestore';
-import Button from '@/components/Button';
-import TourHighlight from '@/components/TourHighlight';
-import ArsenalSkeleton from '@/components/ArsenalSkeleton';
-import FinancialProjection from '@/components/FinancialProjection'; // <-- Impor komponen baru
-import { Trash2 } from 'lucide-react';
-import CurrencyInput from '@/components/CurrencyInput';
+import { collection, query, onSnapshot, orderBy, doc, deleteDoc } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
+import { Plus, TrendingUp, TrendingDown, Edit, Trash2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
-// Tipe data untuk Aset & Liabilitas
-interface ArsenalItem {
+import ArsenalSkeleton from '@/components/ArsenalSkeleton';
+import AddAssetModal from '@/components/AddAssetModal';
+
+// Tipe data yang lebih spesifik
+interface AssetDetails {
+    ticker?: string;
+    shares?: number;
+    price?: number;
+}
+
+interface AssetItem {
   id: string;
   name: string;
   value: number;
+  category: string;
+  details?: AssetDetails;
 }
-// Tipe data untuk Transaksi
-interface Transaction {
-  amount: number;
-  type: 'income' | 'expense';
-  createdAt: Timestamp;
-};
 
+interface DataCardProps {
+  title: string;
+  amount: number;
+  data: AssetItem[];
+  Icon: React.ElementType;
+  colorClass: string;
+  onAddClick: () => void;
+  onEditClick: (item: AssetItem) => void;
+  onDeleteClick: (id: string) => void;
+}
+
+// Fungsi format
+const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
+
+const DataCard = ({ title, amount, data, Icon, colorClass, onAddClick, onEditClick, onDeleteClick }: DataCardProps) => (
+    <div className="bg-[#121212] p-6 rounded-lg border border-gray-800">
+        <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center gap-2">
+                <Icon className={`${colorClass}`} size={20}/>
+                <h3 className="font-bold text-lg">{title}</h3>
+            </div>
+            <button onClick={onAddClick} className="p-1 rounded-full text-gray-400 hover:bg-gray-700 hover:text-white">
+                <Plus size={18}/>
+            </button>
+        </div>
+        <p className={`text-2xl font-black ${colorClass}`}>{formatCurrency(amount)}</p>
+        <hr className="border-gray-800 my-4"/>
+        <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+            {data.map((item: AssetItem) => (
+                <div key={item.id} className="group flex justify-between items-center text-sm hover:bg-gray-800/50 p-1 rounded">
+                    <span>{item.name}</span>
+                    <div className="flex items-center gap-2">
+                        <span className="font-semibold">{formatCurrency(item.value)}</span>
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                             <button onClick={() => onEditClick(item)} className="p-1 text-gray-400 hover:text-white"><Edit size={14}/></button>
+                             <button onClick={() => onDeleteClick(item.id)} className="p-1 text-gray-400 hover:text-red-400"><Trash2 size={14}/></button>
+                        </div>
+                    </div>
+                </div>
+            ))}
+        </div>
+    </div>
+);
 
 export default function ArsenalPage() {
-  const { user, loading: authLoading } = useAuth();
-  const router = useRouter();
-  
-  const [assetName, setAssetName] = useState('');
-  const [assetValue, setAssetValue] = useState('');
-  const [liabilityName, setLiabilityName] = useState('');
-  const [liabilityValue, setLiabilityValue] = useState('');
-  const [assets, setAssets] = useState<ArsenalItem[]>([]);
-  const [liabilities, setLiabilities] = useState<ArsenalItem[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]); // <-- State baru untuk transaksi
-  const [loading, setLoading] = useState(true);
+    const { user, loading: authLoading } = useAuth();
+    const router = useRouter();
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push('/');
-    }
-  }, [user, authLoading, router]);
-
-  useEffect(() => {
-    if (user) {
-      let loadedCount = 0;
-      const totalToLoad = 3;
-      const doneLoading = () => {
-        loadedCount++;
-        if (loadedCount === totalToLoad) setLoading(false);
-      };
-
-      const unsubAssets = onSnapshot(query(collection(db, `users/${user.uid}/assets`), orderBy('name')), (snap) => {
-        setAssets(snap.docs.map(doc => ({ ...doc.data(), id: doc.id } as ArsenalItem)));
-        doneLoading();
-      });
-
-      const unsubLiabilities = onSnapshot(query(collection(db, `users/${user.uid}/liabilities`), orderBy('name')), (snap) => {
-        setLiabilities(snap.docs.map(doc => ({ ...doc.data(), id: doc.id } as ArsenalItem)));
-        doneLoading();
-      });
-
-      // Ambil data transaksi untuk kalkulasi cash flow
-      const unsubTransactions = onSnapshot(query(collection(db, `users/${user.uid}/transactions`)), (snap) => {
-        setTransactions(snap.docs.map(doc => doc.data() as Transaction));
-        doneLoading();
-      });
-
-      return () => {
-        unsubAssets();
-        unsubLiabilities();
-        unsubTransactions();
-      };
-    }
-  }, [user]);
-
-  const addAsset = async (e: React.FormEvent) => { e.preventDefault(); if (assetName.trim() && assetValue && user) { await addDoc(collection(db, `users/${user.uid}/assets`), { name: assetName, value: parseFloat(assetValue.replace(/[^0-9]/g, '')) }); setAssetName(''); setAssetValue(''); } };
-  const addLiability = async (e: React.FormEvent) => { e.preventDefault(); if (liabilityName.trim() && liabilityValue && user) { await addDoc(collection(db, `users/${user.uid}/liabilities`), { name: liabilityName, value: parseFloat(liabilityValue.replace(/[^0-9]/g, '')) }); setLiabilityName(''); setLiabilityValue(''); } };
-  const deleteItem = async (collectionName: 'assets' | 'liabilities', id: string) => { if (user) { await deleteDoc(doc(db, `users/${user.uid}/${collectionName}`, id)); } };
-
-  const { totalAssets, totalLiabilities, netWorth, avgMonthlyCashflow } = useMemo(() => {
-    const assetsSum = assets.reduce((s, a) => s + a.value, 0);
-    const liabilitiesSum = liabilities.reduce((s, l) => s + l.value, 0);
+    const [assets, setAssets] = useState<AssetItem[]>([]);
+    const [liabilities, setLiabilities] = useState<AssetItem[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
     
-    // Kalkulasi cash flow rata-rata dari 90 hari terakhir
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-    
-    const recentTransactions = transactions.filter(t => t.createdAt.toDate() > ninetyDaysAgo);
-    const monthlyCashflow = recentTransactions.reduce((acc, curr) => {
-        return acc + (curr.type === 'income' ? curr.amount : -curr.amount);
-    }, 0) / 3; // Dibagi 3 untuk rata-rata bulanan
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [modalType, setModalType] = useState<'asset' | 'liability'>('asset');
+    const [editingItem, setEditingItem] = useState<AssetItem | null>(null);
 
-    return { 
-      totalAssets: assetsSum,
-      totalLiabilities: liabilitiesSum,
-      netWorth: assetsSum - liabilitiesSum,
-      avgMonthlyCashflow: monthlyCashflow > 0 ? monthlyCashflow : 0 // Hanya ambil cashflow positif sebagai surplus
+    useEffect(() => {
+        if (!user) {
+            if (!authLoading) router.push('/');
+            return;
+        }
+
+        const assetsQuery = query(collection(db, 'users', user.uid, 'assets'), orderBy('value', 'desc'));
+        const liabilitiesQuery = query(collection(db, 'users', user.uid, 'liabilities'), orderBy('value', 'desc'));
+
+        const unsubAssets = onSnapshot(assetsQuery, (snap) => {
+            setAssets(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AssetItem)));
+            setIsLoading(false);
+        });
+        const unsubLiabilities = onSnapshot(liabilitiesQuery, (snap) => {
+            setLiabilities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AssetItem)));
+            setIsLoading(false);
+        });
+
+        return () => {
+            unsubAssets();
+            unsubLiabilities();
+        };
+    }, [user, authLoading, router]);
+
+    const { totalAssets, totalLiabilities, netWorth } = useMemo(() => {
+        const totalAssetsValue = assets.reduce((sum, a) => sum + a.value, 0);
+        const totalLiabilitiesValue = liabilities.reduce((sum, l) => sum + l.value, 0);
+        return { totalAssets: totalAssetsValue, totalLiabilities: totalLiabilitiesValue, netWorth: totalAssetsValue - totalLiabilitiesValue };
+    }, [assets, liabilities]);
+
+    const openModal = (type: 'asset' | 'liability', item: AssetItem | null = null) => {
+        setModalType(type);
+        setEditingItem(item);
+        setIsModalOpen(true);
     };
-  }, [assets, liabilities, transactions]);
 
-  const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
+    const handleDelete = async (id: string, type: 'asset' | 'liability') => {
+        if (!user || !window.confirm("Yakin mau hapus item ini?")) return;
+        
+        const collectionName = type === 'asset' ? 'assets' : 'liabilities';
+        const docRef = doc(db, 'users', user.uid, collectionName, id);
+        try {
+            await deleteDoc(docRef);
+            toast.success("Item berhasil dihapus.");
+        } catch (error) {
+            toast.error("Gagal menghapus item.");
+            console.error("Delete Error:", error);
+        }
+    };
 
-  if (authLoading || loading || !user) {
-    return <ArsenalSkeleton />;
-  }
+    if (isLoading || authLoading) {
+        return <ArsenalSkeleton />;
+    }
 
-  return (
-    <TourHighlight
-      tourId="arsenal"
-      title="Selamat Datang di Kekayaan Bersih!"
-      description="Ini adalah neraca keuanganmu. Catat semua Aset (yang kamu miliki) dan Liabilitas (utangmu) untuk melihat total Kekayaan Bersih (Net Worth) secara real-time."
-    >
-      <main className="p-4 md:p-6 lg:p-8 bg-[#0A0A0A] pb-28 text-white">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-3xl font-black text-center uppercase text-[#A8FF00]">Kekayaan Bersih</h1>
-          <p className="text-center text-gray-400 mt-2 max-w-md mx-auto">Catat semua aset (yang lo miliki) dan liabilitas (utang lo) untuk melihat kekayaan bersihmu.</p>
-          
-          <div className="mt-8 p-4 bg-[#121212] rounded-lg border border-gray-800 text-center max-w-md mx-auto">
-            <p className="text-sm uppercase text-gray-400">Total Kekayaan Bersih</p>
-            <p className={`text-4xl font-black ${netWorth >= 0 ? 'text-white' : 'text-red-500'}`}>{formatCurrency(netWorth)}</p>
-          </div>
+    return (
+        <>
+            <main className="p-4 md:p-6 lg:p-8 bg-[#0A0A0A] pb-28 min-h-screen text-white">
+                <div className="max-w-4xl mx-auto">
+                    <h1 className="text-3xl font-black text-center uppercase">Arsenal Kekayaan</h1>
+                    <p className="text-center text-gray-400 mt-2">Ukur total kekayaan bersihmu di sini.</p>
 
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="bg-[#121212] p-6 rounded-lg border border-gray-800">
-              <h2 className="text-xl font-bold text-green-400">ASET ({formatCurrency(totalAssets)})</h2>
-              <p className="text-xs text-gray-500 mb-4">Apa saja yang kamu miliki?</p>
-              <form onSubmit={addAsset} className="flex flex-col space-y-2">
-                <input type="text" value={assetName} onChange={(e) => setAssetName(e.target.value)} placeholder="Nama Aset (e.g., Tabungan)" className="input-style w-full" />
-                <CurrencyInput value={assetValue} onChange={setAssetValue} placeholder="Jumlah (e.g., Rp 5.000.000)" className="input-style w-full" />
-                <Button type="submit" className="text-xs py-2 mt-2">Tambah Aset</Button>
-              </form>
-              <ul className="mt-4 space-y-2 max-h-60 overflow-y-auto pr-2">{assets.map(item => (<li key={item.id} className="flex justify-between items-center bg-gray-800 p-2 rounded"><span>{item.name}</span><div className="flex items-center space-x-2"><span>{formatCurrency(item.value)}</span><button onClick={() => deleteItem('assets', item.id)} className="text-gray-500 hover:text-red-500"><Trash2 size={16}/></button></div></li>))}</ul>
-            </div>
-            
-            <div className="bg-[#121212] p-6 rounded-lg border border-gray-800">
-              <h2 className="text-xl font-bold text-red-400">LIABILITAS ({formatCurrency(totalLiabilities)})</h2>
-              <p className="text-xs text-gray-500 mb-4">Apa saja utangmu?</p>
-              <form onSubmit={addLiability} className="flex flex-col space-y-2">
-                <input type="text" value={liabilityName} onChange={(e) => setLiabilityName(e.target.value)} placeholder="Nama Utang (e.g., Cicilan HP)" className="input-style w-full" />
-                <CurrencyInput value={liabilityValue} onChange={setLiabilityValue} placeholder="Jumlah (e.g., Rp 2.000.000)" className="input-style w-full" />
-                <Button type="submit" className="text-xs py-2 mt-2">Tambah Liabilitas</Button>
-              </form>
-              <ul className="mt-4 space-y-2 max-h-60 overflow-y-auto pr-2">{liabilities.map(item => (<li key={item.id} className="flex justify-between items-center bg-gray-800 p-2 rounded"><span>{item.name}</span><div className="flex items-center space-x-2"><span>{formatCurrency(item.value)}</span><button onClick={() => deleteItem('liabilities', item.id)} className="text-gray-500 hover:text-red-500"><Trash2 size={16}/></button></div></li>))}</ul>
-            </div>
-          </div>
-          
-          {/* Menampilkan komponen proyeksi baru */}
-          <FinancialProjection initialNetWorth={netWorth} avgMonthlyCashflow={avgMonthlyCashflow} />
+                    <div className="mt-8 p-4 bg-gradient-to-r from-[#a8ff00]/10 to-transparent rounded-lg border border-gray-800 text-center max-w-md mx-auto">
+                        <p className="text-sm font-bold text-gray-400">Total Kekayaan Bersih</p>
+                        <p className="text-4xl font-black text-[#A8FF00] mt-1">{formatCurrency(netWorth)}</p>
+                    </div>
 
-        </div>
-      </main>
-    </TourHighlight>
-  );
+                    <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <DataCard title="Aset" amount={totalAssets} data={assets} Icon={TrendingUp} colorClass="text-green-400" 
+                            onAddClick={() => openModal('asset')}
+                            onEditClick={(item: AssetItem) => openModal('asset', item)}
+                            onDeleteClick={(id: string) => handleDelete(id, 'asset')}
+                        />
+                        <DataCard title="Liabilitas" amount={totalLiabilities} data={liabilities} Icon={TrendingDown} colorClass="text-red-400"
+                            onAddClick={() => openModal('liability')}
+                            onEditClick={(item: AssetItem) => openModal('liability', item)}
+                            onDeleteClick={(id: string) => handleDelete(id, 'liability')}
+                        />
+                    </div>
+                </div>
+            </main>
+            <AddAssetModal 
+                isOpen={isModalOpen} 
+                onClose={() => setIsModalOpen(false)} 
+                assetType={modalType}
+                initialData={editingItem}
+            />
+        </>
+    );
 }

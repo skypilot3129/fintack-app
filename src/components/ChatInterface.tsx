@@ -2,64 +2,31 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
-import { getFunctions, httpsCallable } from 'firebase/functions';
-import { app } from '@/lib/firebase';
-import {
-  getFirestore,
-  collection,
-  addDoc,
-  query,
-  onSnapshot,
-  orderBy,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { Content } from '@/types/gemini';
 import { Send, Mic } from 'lucide-react';
 import AiMessage from './AiMessage';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
-
-type Message = {
-  text: string;
-  sender: 'user' | 'ai';
-};
+import { useChatStore } from '@/stores/chatStore';
 
 type ChatInterfaceProps = {
   user: User;
 };
 
-type AskMentorAIResponse = {
-  textResponse: string;
-  audioUrl?: string | null;
-}
-
 export default function ChatInterface({ user }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [geminiHistory, setGeminiHistory] = useState<Content[]>([]);
+  const { messages, isAiTyping, initializeChat, sendMessage, reset } = useChatStore();
+  
   const [input, setInput] = useState('');
-  const [isAiTyping, setIsAiTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const db = getFirestore(app);
 
   useEffect(() => {
-    if (!user) return;
-    const chatHistoryColRef = collection(db, 'users', user.uid, 'chatHistory');
-    const q = query(chatHistoryColRef, orderBy('createdAt', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (snapshot.empty) {
-        setMessages([{ text: `Selamat datang di Fintack, ${user.displayName || 'Pilot'}. Apa masalah keuangan terbesar lo sekarang? Langsung ke intinya! 🔥`, sender: 'ai' }]);
-        return;
-      }
-      const historyFromDb = snapshot.docs.map(doc => doc.data());
-      const uiMessages: Message[] = historyFromDb.map(msg => ({ text: msg.parts[0].text, sender: msg.role === 'user' ? 'user' : 'ai' }));
-      setMessages(uiMessages);
-      const apiHistory: Content[] = historyFromDb.map(msg => ({ role: msg.role, parts: msg.parts }));
-      setGeminiHistory(apiHistory);
-    });
-    return () => unsubscribe();
-  }, [user, db]);
+    if (user) {
+      const unsubscribe = initializeChat(user.uid, user.displayName);
+      return () => {
+        unsubscribe();
+        reset(); // Reset state saat user berubah/logout
+      };
+    }
+  }, [user, initializeChat, reset]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -73,60 +40,20 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     }
   }, [input]);
 
-  const submitMessage = async (messageText: string, inputType: 'text' | 'voice') => {
-    if (messageText.trim() === '' || isAiTyping) return;
-
-    await addDoc(collection(db, 'users', user.uid, 'chatHistory'), {
-        role: 'user',
-        parts: [{ text: messageText }],
-        createdAt: serverTimestamp(),
-    });
-
-    setIsAiTyping(true);
-
-    try {
-      const functions = getFunctions();
-      const askMentorAI = httpsCallable(functions, 'askMentorAI');
-      const result = await askMentorAI({ 
-        prompt: messageText, 
-        history: geminiHistory,
-        inputType: inputType 
-      });
-      
-      const { textResponse, audioUrl } = result.data as AskMentorAIResponse;
-
-      if (audioUrl) {
-          if (audioRef.current) {
-              audioRef.current.pause();
-          }
-          audioRef.current = new Audio(audioUrl);
-          audioRef.current.play().catch(e => console.error("Audio play failed:", e));
-      }
-
-      await addDoc(collection(db, 'users', user.uid, 'chatHistory'), {
-        role: 'model',
-        parts: [{ text: textResponse }],
-        createdAt: serverTimestamp(),
-      });
-
-    } catch (error) {
-      console.error("Error calling cloud function:", error);
-      await addDoc(collection(db, 'users', user.uid, 'chatHistory'), {
-        role: 'model',
-        parts: [{ text: "Gagal menghubungi mentor. Coba lagi nanti." }],
-        createdAt: serverTimestamp(),
-      });
-    } finally {
-      setIsAiTyping(false);
+  const submitTextMessage = () => {
+    if (input.trim()) {
+      sendMessage(user.uid, input, 'text');
+      setInput('');
     }
   };
-  
+
+  const submitVoiceMessage = (transcript: string) => {
+    sendMessage(user.uid, transcript, 'voice');
+  };
+
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if(input.trim()) {
-        submitMessage(input, 'text');
-        setInput('');
-    }
+    submitTextMessage();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -136,10 +63,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     }
   };
 
-  // PERBAIKAN: Panggil 'stopListening' dari hook
-  const { isListening, startListening, stopListening } = useVoiceChat((transcript) => {
-      submitMessage(transcript, 'voice');
-  });
+  const { isListening, startListening, stopListening } = useVoiceChat(submitVoiceMessage);
 
   const lastMessageIndex = messages.length - 1;
 
@@ -182,13 +106,12 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
           />
           
           {input.trim() ? (
-            <button type="submit" className="..." disabled={isAiTyping}>
+            <button type="submit" className="bg-[#A8FF00] text-black rounded-full p-3 hover:bg-lime-400 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed flex-shrink-0" disabled={isAiTyping}>
               <Send size={18} />
             </button>
           ) : (
             <button 
               type="button" 
-              // PERBAIKAN: Logika toggle di sini
               onClick={isListening ? stopListening : startListening}
               disabled={isAiTyping}
               className={`bg-gray-700 text-white rounded-full p-3 transition-colors flex-shrink-0 disabled:bg-gray-600 disabled:cursor-not-allowed ${isListening ? 'bg-red-500 animate-pulse' : 'hover:bg-gray-600'}`}
