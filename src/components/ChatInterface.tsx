@@ -22,21 +22,18 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const { isPlaying: isAudioPlaying, startQueue, stopQueue } = useAudioQueue();
   const [processedAudioMessageId, setProcessedAudioMessageId] = useState<string | null>(null);
 
-  // --- PERBAIKAN BUG HALAMAN KOSONG ---
-  // Kita akan memastikan proses cleanup berjalan setiap kali user berubah atau komponen dilepas
   useEffect(() => {
     if (user) {
       const unsubscribe = initializeChat(user.uid, user.displayName);
       
-      // Fungsi cleanup ini akan dipanggil saat user logout atau pindah halaman
+      // --- PERBAIKAN UTAMA: HAPUS `reset()` DARI SINI ---
       return () => {
         console.log("Cleaning up chat listener for user:", user.uid);
-        unsubscribe();
-        reset();
-        stopQueue(); // Pastikan audio juga berhenti
+        unsubscribe(); // Hanya unsubscribe listener
+        stopQueue();   // Dan hentikan audio
       };
     }
-  }, [user, initializeChat, reset, stopQueue]);
+  }, [user, initializeChat, stopQueue]);
 
 
   // Logika untuk memutar audio secara otomatis (tidak berubah)

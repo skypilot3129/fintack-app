@@ -21,7 +21,7 @@ type Message = {
   audioUrls?: string[] | null;
 };
 
-// --- INTERFACE BARU UNTUK STRUKTUR DATA DI FIRESTORE ---
+// Interface untuk struktur data di Firestore
 interface ChatHistoryDoc {
     id: string;
     role: 'user' | 'model';
@@ -50,7 +50,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isInitialized: false,
 
   initializeChat: (uid, displayName) => {
-    if (get().isInitialized) return () => {};
+    // --- PERBAIKAN UTAMA: PANGGIL RESET DI AWAL ---
+    get().reset(); // Pastikan state bersih sebelum memulai listener baru
 
     set({ isInitialized: true });
     const chatHistoryColRef = collection(db, 'users', uid, 'chatHistory');
@@ -68,7 +69,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
-      // --- PERBAIKAN DI SINI: Gunakan 'as' untuk memberi tahu TypeScript tipe datanya ---
       const historyFromDb = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as ChatHistoryDoc);
       
       const uiMessages: Message[] = historyFromDb.map(msg => ({
