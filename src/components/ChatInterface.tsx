@@ -19,14 +19,22 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { isPlaying: isAudioPlaying, startQueue, stopQueue } = useAudioQueue();
-  const lastMessage = messages[messages.length - 1];
-
+  
+  // --- PERBAIKAN UTAMA ADA DI SINI ---
   useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+    
+    // Log untuk debugging: Tampilkan pesan terakhir setiap kali ada pembaruan
+    console.log("Pesan terakhir diperbarui:", lastMessage);
+
     if (lastMessage?.sender === 'ai' && lastMessage.audioUrls && lastMessage.audioUrls.length > 0) {
+      console.log("MENDETEKSI audioUrls, memulai antrean:", lastMessage.audioUrls);
       startQueue(lastMessage.audioUrls);
     }
-  }, [lastMessage, startQueue]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, startQueue]); // Ubah dependency ke messages.length
 
+  // Inisialisasi chat
   useEffect(() => {
     if (user) {
       const unsubscribe = initializeChat(user.uid, user.displayName);
@@ -37,10 +45,12 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     }
   }, [user, initializeChat, reset]);
 
+  // Scroll otomatis
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isAiTyping]);
   
+  // Penyesuaian tinggi textarea
   useEffect(() => {
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -69,7 +79,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      submitTextMessage(); // <-- PERBAIKAN: Panggil fungsi inti secara langsung
+      submitTextMessage();
     }
   };
 
