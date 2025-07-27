@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
-import { Send, Mic } from 'lucide-react';
+import { Send, Mic, Square } from 'lucide-react';
 import AiMessage from './AiMessage';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useChatStore } from '@/stores/chatStore';
+import { useAudioQueue } from '@/hooks/useAudioQueue';
 
 type ChatInterfaceProps = {
   user: User;
@@ -13,17 +14,25 @@ type ChatInterfaceProps = {
 
 export default function ChatInterface({ user }: ChatInterfaceProps) {
   const { messages, isAiTyping, initializeChat, sendMessage, reset } = useChatStore();
-  
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const { isPlaying: isAudioPlaying, startQueue, stopQueue } = useAudioQueue();
+  const lastMessage = messages[messages.length - 1];
+
+  useEffect(() => {
+    if (lastMessage?.sender === 'ai' && lastMessage.audioUrls && lastMessage.audioUrls.length > 0) {
+      startQueue(lastMessage.audioUrls);
+    }
+  }, [lastMessage, startQueue]);
 
   useEffect(() => {
     if (user) {
       const unsubscribe = initializeChat(user.uid, user.displayName);
       return () => {
         unsubscribe();
-        reset(); // Reset state saat user berubah/logout
+        reset();
       };
     }
   }, [user, initializeChat, reset]);
@@ -35,19 +44,20 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   useEffect(() => {
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
-        const scrollHeight = textareaRef.current.scrollHeight;
-        textareaRef.current.style.height = `${scrollHeight}px`;
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [input]);
 
   const submitTextMessage = () => {
     if (input.trim()) {
+      stopQueue();
       sendMessage(user.uid, input, 'text');
       setInput('');
     }
   };
 
   const submitVoiceMessage = (transcript: string) => {
+    stopQueue();
     sendMessage(user.uid, transcript, 'voice');
   };
 
@@ -59,12 +69,12 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleFormSubmit(e);
+      submitTextMessage(); // <-- PERBAIKAN: Panggil fungsi inti secara langsung
     }
   };
 
   const { isListening, startListening, stopListening } = useVoiceChat(submitVoiceMessage);
-
+  
   const lastMessageIndex = messages.length - 1;
 
   return (
@@ -78,11 +88,11 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
         {messages.map((msg, index) => (
           <div key={index} className={`flex mb-4 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-xs md:max-w-md lg:max-w-lg px-4 py-2 rounded-lg ${msg.sender === 'user' ? 'bg-[#A8FF00] text-black' : 'bg-gray-800 text-white'}`}>
-              <AiMessage text={msg.text} isStreaming={index === lastMessageIndex && isAiTyping} />
+              <AiMessage text={msg.text} isStreaming={index === lastMessageIndex && isAiTyping && !isAudioPlaying} />
             </div>
           </div>
         ))}
-        {isAiTyping && (
+        {isAiTyping && !isAudioPlaying && (
           <div className="flex justify-start mb-4">
             <div className="bg-gray-800 text-white px-4 py-2 rounded-lg">
               <p className="text-sm animate-pulse">Mas Eugene sedang berpikir...</p>
@@ -105,7 +115,11 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
             disabled={isAiTyping || isListening}
           />
           
-          {input.trim() ? (
+          {isAudioPlaying ? (
+            <button type="button" onClick={stopQueue} className="bg-red-500 text-white rounded-full p-3 flex-shrink-0" title="Hentikan Suara">
+              <Square size={18} />
+            </button>
+          ) : input.trim() ? (
             <button type="submit" className="bg-[#A8FF00] text-black rounded-full p-3 hover:bg-lime-400 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed flex-shrink-0" disabled={isAiTyping}>
               <Send size={18} />
             </button>

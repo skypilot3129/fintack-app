@@ -12,10 +12,11 @@ import {
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
 
-// Tipe untuk pesan di UI
+// Tipe untuk pesan di UI, tambahkan audioUrls
 type Message = {
   text: string;
   sender: 'user' | 'ai';
+  audioUrls?: string[] | null;
 };
 
 // Tipe untuk state di dalam store
@@ -48,7 +49,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const unsubscribe = onSnapshot(q, (snapshot) => {
       if (snapshot.empty) {
         set({
-          messages: [{ text: `Selamat datang di Fintack, ${displayName || 'Pilot'}. Apa masalah keuangan terbesar lo sekarang? Langsung ke intinya! 🔥`, sender: 'ai' }],
+          messages: [{ 
+            text: `Selamat datang di Fintack, ${displayName || 'Pilot'}. Apa masalah keuangan terbesar lo sekarang? Langsung ke intinya! 🔥`, 
+            sender: 'ai' 
+          }],
         });
         return;
       }
@@ -57,6 +61,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const uiMessages: Message[] = historyFromDb.map(msg => ({
         text: msg.parts[0].text,
         sender: msg.role === 'user' ? 'user' : 'ai',
+        // Tambahkan audioUrls jika ada (meskipun data lama tidak akan punya)
+        audioUrls: msg.audioUrls || null,
       }));
       const apiHistory: Content[] = historyFromDb.map(msg => ({
           role: msg.role,
@@ -72,8 +78,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sendMessage: async (uid, messageText, inputType) => {
     if (messageText.trim() === '' || get().isAiTyping) return;
 
-    const chatHistoryColRef = collection(db, 'users', uid, 'chatHistory');
-    await addDoc(chatHistoryColRef, {
+    // Tambahkan pesan pengguna ke UI secara optimis
+    addDoc(collection(db, 'users', uid, 'chatHistory'), {
         role: 'user',
         parts: [{ text: messageText }],
         createdAt: serverTimestamp(),
@@ -91,21 +97,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
             inputType: inputType 
         });
         
-        const { textResponse, audioUrl } = result.data as { textResponse: string; audioUrl?: string | null };
+        const { textResponse, audioUrls } = result.data as { textResponse: string; audioUrls?: string[] | null };
 
-        if (audioUrl) {
-            const audio = new Audio(audioUrl);
-            audio.play().catch(e => console.error("Audio play failed:", e));
-        }
-
-        await addDoc(chatHistoryColRef, {
+        // Simpan respons AI lengkap ke Firestore
+        await addDoc(collection(db, 'users', uid, 'chatHistory'), {
             role: 'model',
             parts: [{ text: textResponse }],
             createdAt: serverTimestamp(),
+            // Simpan juga audioUrls agar bisa diputar lagi jika user me-reload
+            audioUrls: audioUrls || null, 
         });
+
     } catch (error) {
         console.error("Error calling cloud function:", error);
-        await addDoc(chatHistoryColRef, {
+        await addDoc(collection(db, 'users', uid, 'chatHistory'), {
             role: 'model',
             parts: [{ text: "Gagal menghubungi mentor. Coba lagi nanti." }],
             createdAt: serverTimestamp(),
