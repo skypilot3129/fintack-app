@@ -14,42 +14,45 @@ type ChatInterfaceProps = {
 };
 
 export default function ChatInterface({ user }: ChatInterfaceProps) {
-  // --- PERBAIKAN: Hapus 'reset' dari sini ---
-  const { messages, isAiTyping, initializeChat, sendMessage } = useChatStore();
+  // --- PERBAIKAN: Ambil state & action baru dari store ---
+  const { messages, isAiTyping, initializeChat, sendMessage, reset, processedAudioMessageId, setProcessedAudioMessageId } = useChatStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { isPlaying: isAudioPlaying, startQueue, stopQueue } = useAudioQueue();
-  const [processedAudioMessageId, setProcessedAudioMessageId] = useState<string | null>(null);
+  
+  // Hapus state lokal, karena sekarang dikelola oleh store
+  // const [processedAudioMessageId, setProcessedAudioMessageId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
       const unsubscribe = initializeChat(user.uid, user.displayName);
       
-      // --- PERBAIKAN UTAMA: Hapus `stopQueue()` dari sini ---
       return () => {
         console.log("Cleaning up chat listener for user:", user.uid);
-        unsubscribe(); // Cleanup sekarang hanya bertanggung jawab pada listener Firestore
+        unsubscribe();
       };
+    } else {
+        // Jika tidak ada user (misal: logout), panggil reset
+        reset();
     }
-  }, [user, initializeChat]); // Hapus dependensi yang tidak perlu
+  }, [user, initializeChat, reset]);
 
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
 
     if (
       lastMessage?.id &&
-      lastMessage.id !== processedAudioMessageId &&
+      lastMessage.id !== processedAudioMessageId && // Gunakan state dari store
       lastMessage.sender === 'ai' &&
       lastMessage.audioUrls &&
       lastMessage.audioUrls.length > 0
     ) {
-      setProcessedAudioMessageId(lastMessage.id);
+      setProcessedAudioMessageId(lastMessage.id); // Gunakan action dari store
       startQueue(lastMessage.audioUrls);
     }
-    // --- PERBAIKAN 2: Komentar eslint-disable dihapus dari sini ---
-  }, [messages, startQueue, processedAudioMessageId]);
+  }, [messages, startQueue, processedAudioMessageId, setProcessedAudioMessageId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

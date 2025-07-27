@@ -36,6 +36,8 @@ interface ChatState {
   geminiHistory: Content[];
   isAiTyping: boolean;
   isInitialized: boolean;
+  processedAudioMessageId: string | null; // <-- STATE BARU
+  setProcessedAudioMessageId: (id: string | null) => void; // <-- AKSI BARU
   initializeChat: (uid: string, displayName: string | null) => () => void;
   sendMessage: (uid: string, messageText: string, inputType: 'text' | 'voice') => Promise<void>;
   reset: () => void;
@@ -48,11 +50,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   geminiHistory: [],
   isAiTyping: false,
   isInitialized: false,
+  processedAudioMessageId: null, // <-- Nilai Awal
+
+  setProcessedAudioMessageId: (id) => set({ processedAudioMessageId: id }), // <-- Implementasi Aksi
 
   initializeChat: (uid, displayName) => {
-    // --- PERBAIKAN UTAMA: PANGGIL RESET DI AWAL ---
-    get().reset(); // Pastikan state bersih sebelum memulai listener baru
-
+    // PERBAIKAN: Hapus panggilan get().reset() yang agresif dari sini
+    
     set({ isInitialized: true });
     const chatHistoryColRef = collection(db, 'users', uid, 'chatHistory');
     const q = query(chatHistoryColRef, orderBy('createdAt', 'asc'));
@@ -102,22 +106,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
         const functions = getFunctions();
         const askMentorAI = httpsCallable(functions, 'askMentorAI');
-        
         const result = await askMentorAI({ 
             prompt: messageText, 
             history: get().geminiHistory,
             inputType: inputType 
         });
-        
         const { textResponse, audioUrls } = result.data as { textResponse: string; audioUrls?: string[] | null };
-
         await addDoc(collection(db, 'users', uid, 'chatHistory'), {
             role: 'model',
             parts: [{ text: textResponse }],
             createdAt: serverTimestamp(),
             audioUrls: audioUrls || null, 
         });
-
     } catch (error) {
         console.error("Error calling cloud function:", error);
         await addDoc(collection(db, 'users', uid, 'chatHistory'), {
@@ -136,6 +136,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       geminiHistory: [],
       isAiTyping: false,
       isInitialized: false,
+      processedAudioMessageId: null, // <-- Reset juga ID ini
     });
   },
 }));
