@@ -20,21 +20,25 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
 
   const { isPlaying: isAudioPlaying, startQueue, stopQueue } = useAudioQueue();
   
-  // --- PERBAIKAN UTAMA ADA DI SINI ---
+  const [processedAudioMessageId, setProcessedAudioMessageId] = useState<string | null>(null);
+
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
-    
-    // Log untuk debugging: Tampilkan pesan terakhir setiap kali ada pembaruan
-    console.log("Pesan terakhir diperbarui:", lastMessage);
 
-    if (lastMessage?.sender === 'ai' && lastMessage.audioUrls && lastMessage.audioUrls.length > 0) {
-      console.log("MENDETEKSI audioUrls, memulai antrean:", lastMessage.audioUrls);
+    if (
+      lastMessage?.id &&
+      lastMessage.id !== processedAudioMessageId &&
+      lastMessage.sender === 'ai' &&
+      lastMessage.audioUrls &&
+      lastMessage.audioUrls.length > 0
+    ) {
+      setProcessedAudioMessageId(lastMessage.id);
       startQueue(lastMessage.audioUrls);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, startQueue]); // Ubah dependency ke messages.length
+  }, [messages, startQueue, processedAudioMessageId]);
 
-  // Inisialisasi chat
+
   useEffect(() => {
     if (user) {
       const unsubscribe = initializeChat(user.uid, user.displayName);
@@ -45,12 +49,10 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     }
   }, [user, initializeChat, reset]);
 
-  // Scroll otomatis
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isAiTyping]);
   
-  // Penyesuaian tinggi textarea
   useEffect(() => {
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';

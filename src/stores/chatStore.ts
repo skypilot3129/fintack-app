@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Content } from '@/types/gemini';
+import { Content, Part } from '@/types/gemini';
 import {
   getFirestore,
   collection,
@@ -8,16 +8,27 @@ import {
   orderBy,
   addDoc,
   serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
 
-// Tipe untuk pesan di UI, tambahkan audioUrls
+// Tipe untuk pesan di UI
 type Message = {
+  id: string;
   text: string;
   sender: 'user' | 'ai';
   audioUrls?: string[] | null;
 };
+
+// --- INTERFACE BARU UNTUK STRUKTUR DATA DI FIRESTORE ---
+interface ChatHistoryDoc {
+    id: string;
+    role: 'user' | 'model';
+    parts: Part[];
+    createdAt: Timestamp;
+    audioUrls?: string[] | null;
+}
 
 // Tipe untuk state di dalam store
 interface ChatState {
@@ -39,7 +50,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isInitialized: false,
 
   initializeChat: (uid, displayName) => {
-    // Cegah inisialisasi ganda
     if (get().isInitialized) return () => {};
 
     set({ isInitialized: true });
@@ -50,6 +60,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (snapshot.empty) {
         set({
           messages: [{ 
+            id: 'welcome-message',
             text: `Selamat datang di Fintack, ${displayName || 'Pilot'}. Apa masalah keuangan terbesar lo sekarang? Langsung ke intinya! 🔥`, 
             sender: 'ai' 
           }],
@@ -57,11 +68,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
-      const historyFromDb = snapshot.docs.map(doc => doc.data());
+      // --- PERBAIKAN DI SINI: Gunakan 'as' untuk memberi tahu TypeScript tipe datanya ---
+      const historyFromDb = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as ChatHistoryDoc);
+      
       const uiMessages: Message[] = historyFromDb.map(msg => ({
+        id: msg.id,
         text: msg.parts[0].text,
         sender: msg.role === 'user' ? 'user' : 'ai',
-        // Tambahkan audioUrls jika ada (meskipun data lama tidak akan punya)
         audioUrls: msg.audioUrls || null,
       }));
       const apiHistory: Content[] = historyFromDb.map(msg => ({
@@ -78,7 +91,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sendMessage: async (uid, messageText, inputType) => {
     if (messageText.trim() === '' || get().isAiTyping) return;
 
-    // Tambahkan pesan pengguna ke UI secara optimis
     addDoc(collection(db, 'users', uid, 'chatHistory'), {
         role: 'user',
         parts: [{ text: messageText }],
@@ -99,12 +111,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         
         const { textResponse, audioUrls } = result.data as { textResponse: string; audioUrls?: string[] | null };
 
-        // Simpan respons AI lengkap ke Firestore
         await addDoc(collection(db, 'users', uid, 'chatHistory'), {
             role: 'model',
             parts: [{ text: textResponse }],
             createdAt: serverTimestamp(),
-            // Simpan juga audioUrls agar bisa diputar lagi jika user me-reload
             audioUrls: audioUrls || null, 
         });
 
