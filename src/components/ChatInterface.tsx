@@ -14,7 +14,6 @@ type ChatInterfaceProps = {
 };
 
 export default function ChatInterface({ user }: ChatInterfaceProps) {
-  // --- PERBAIKAN: Ambil state & action baru dari store ---
   const { messages, isAiTyping, initializeChat, sendMessage, reset, processedAudioMessageId, setProcessedAudioMessageId } = useChatStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -22,34 +21,28 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
 
   const { isPlaying: isAudioPlaying, startQueue, stopQueue } = useAudioQueue();
   
-  // Hapus state lokal, karena sekarang dikelola oleh store
-  // const [processedAudioMessageId, setProcessedAudioMessageId] = useState<string | null>(null);
-
   useEffect(() => {
     if (user) {
       const unsubscribe = initializeChat(user.uid, user.displayName);
-      
       return () => {
         console.log("Cleaning up chat listener for user:", user.uid);
         unsubscribe();
       };
     } else {
-        // Jika tidak ada user (misal: logout), panggil reset
-        reset();
+      reset();
     }
   }, [user, initializeChat, reset]);
 
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
-
     if (
       lastMessage?.id &&
-      lastMessage.id !== processedAudioMessageId && // Gunakan state dari store
+      lastMessage.id !== processedAudioMessageId &&
       lastMessage.sender === 'ai' &&
       lastMessage.audioUrls &&
       lastMessage.audioUrls.length > 0
     ) {
-      setProcessedAudioMessageId(lastMessage.id); // Gunakan action dari store
+      setProcessedAudioMessageId(lastMessage.id);
       startQueue(lastMessage.audioUrls);
     }
   }, [messages, startQueue, processedAudioMessageId, setProcessedAudioMessageId]);
@@ -94,6 +87,16 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   
   const lastMessageIndex = messages.length - 1;
 
+  const getPlaceholderText = () => {
+    if (isListening) {
+      return "Mendengarkan... bicaralah yang jelas.";
+    }
+    if (isAiTyping) {
+      return "Mas Eugene sedang mengetik...";
+    }
+    return "Ketik atau tekan mic untuk bicara...";
+  };
+
   return (
     <div className="flex flex-col h-full bg-[#121212] rounded-lg border border-gray-800">
       <div className="p-4 border-b border-gray-800 flex-shrink-0">
@@ -105,7 +108,6 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
         {messages.map((msg, index) => (
           <div key={index} className={`flex mb-4 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-xs md:max-w-md lg:max-w-lg px-4 py-2 rounded-lg ${msg.sender === 'user' ? 'bg-[#A8FF00] text-black' : 'bg-gray-800 text-white'}`}>
-              
               {msg.sender === 'ai' ? (
                 <>
                   <AiMessage text={msg.text} isStreaming={index === lastMessageIndex && isAiTyping && !isAudioPlaying} />
@@ -116,7 +118,6 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
               ) : (
                 <p>{msg.text}</p>
               )}
-
             </div>
           </div>
         ))}
@@ -137,8 +138,8 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ketik atau tekan mic untuk bicara..."
-            className="flex-1 bg-gray-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A8FF00] resize-none overflow-y-hidden"
+            placeholder={getPlaceholderText()}
+            className={`flex-1 bg-gray-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A8FF00] resize-none overflow-y-hidden transition-all ${isListening ? 'placeholder:text-lime-400' : 'placeholder:text-gray-500'}`}
             rows={1}
             disabled={isAiTyping || isListening}
           />
