@@ -7,17 +7,38 @@ export const useAudioQueue = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Inisialisasi audio element dan event listener 'ended'
   useEffect(() => {
-    // Inisialisasi audio element hanya di client-side
     if (typeof window !== 'undefined' && !audioRef.current) {
         audioRef.current = new Audio();
     }
+    
+    const audioElement = audioRef.current;
+    if (!audioElement) return;
+
+    const handleAudioEnded = () => {
+      setQueue(prevQueue => prevQueue.slice(1));
+    };
+
+    audioElement.addEventListener('ended', handleAudioEnded);
+    
+    // --- PERBAIKAN UTAMA: CLEANUP OTOMATIS ---
+    // Fungsi ini akan otomatis berjalan saat komponen yang menggunakan hook ini di-unmount
+    return () => {
+      audioElement.removeEventListener('ended', handleAudioEnded);
+      // Hentikan audio dan reset source untuk mencegah memory leak
+      audioElement.pause();
+      audioElement.src = '';
+    };
   }, []);
 
   const playNextInQueue = useCallback(() => {
     if (queue.length > 0 && audioRef.current) {
       const nextUrl = queue[0];
-      audioRef.current.src = nextUrl;
+      // Hanya set src jika berbeda untuk menghindari interupsi yang tidak perlu
+      if (audioRef.current.src !== nextUrl) {
+          audioRef.current.src = nextUrl;
+      }
       audioRef.current.play().catch(e => {
         console.error("Audio play failed:", e);
         setIsPlaying(false);
@@ -29,23 +50,7 @@ export const useAudioQueue = () => {
   }, [queue]);
 
   useEffect(() => {
-    const audioElement = audioRef.current;
-    if (!audioElement) return;
-
-    const handleAudioEnded = () => {
-      // Hapus item yang sudah selesai dari antrean dan mainkan berikutnya
-      setQueue(prevQueue => prevQueue.slice(1));
-    };
-
-    audioElement.addEventListener('ended', handleAudioEnded);
-    return () => {
-      audioElement.removeEventListener('ended', handleAudioEnded);
-    };
-  }, []);
-
-  useEffect(() => {
-    // Jika queue berubah (setelah item dihapus), mainkan item berikutnya
-    if (isPlaying) {
+    if (isPlaying) { // Efek ini hanya berjalan jika state isPlaying aktif
       playNextInQueue();
     }
   }, [queue, isPlaying, playNextInQueue]);
@@ -54,12 +59,7 @@ export const useAudioQueue = () => {
   const startQueue = (urls: string[]) => {
     if (urls.length > 0) {
       setQueue(urls);
-      // Memulai pemutaran pertama kali secara manual
-      if (audioRef.current) {
-        audioRef.current.src = urls[0];
-        audioRef.current.play().catch(e => console.error("Audio play failed:", e));
-        setIsPlaying(true);
-      }
+      setIsPlaying(true); // Cukup set state, biarkan useEffect yang menangani pemutaran
     }
   };
 

@@ -14,7 +14,7 @@ type ChatInterfaceProps = {
 };
 
 export default function ChatInterface({ user }: ChatInterfaceProps) {
-  // --- PERBAIKAN 1: 'reset' dihapus dari sini ---
+  // --- PERBAIKAN: Hapus 'reset' dari sini ---
   const { messages, isAiTyping, initializeChat, sendMessage } = useChatStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -27,13 +27,13 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     if (user) {
       const unsubscribe = initializeChat(user.uid, user.displayName);
       
+      // --- PERBAIKAN UTAMA: Hapus `stopQueue()` dari sini ---
       return () => {
         console.log("Cleaning up chat listener for user:", user.uid);
-        unsubscribe();
-        stopQueue();
+        unsubscribe(); // Cleanup sekarang hanya bertanggung jawab pada listener Firestore
       };
     }
-  }, [user, initializeChat, stopQueue]);
+  }, [user, initializeChat]); // Hapus dependensi yang tidak perlu
 
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
