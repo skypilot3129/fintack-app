@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
 import { Send, Mic, Square } from 'lucide-react';
 import AiMessage from './AiMessage';
-import AudioPlayer from './AudioPlayer'; // <-- Impor komponen baru
+import AudioPlayer from './AudioPlayer';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useChatStore } from '@/stores/chatStore';
 import { useAudioQueue } from '@/hooks/useAudioQueue';
@@ -14,7 +14,8 @@ type ChatInterfaceProps = {
 };
 
 export default function ChatInterface({ user }: ChatInterfaceProps) {
-  const { messages, isAiTyping, initializeChat, sendMessage, reset } = useChatStore();
+  // --- PERBAIKAN 1: 'reset' dihapus dari sini ---
+  const { messages, isAiTyping, initializeChat, sendMessage } = useChatStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -26,19 +27,17 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
     if (user) {
       const unsubscribe = initializeChat(user.uid, user.displayName);
       
-      // --- PERBAIKAN UTAMA: HAPUS `reset()` DARI SINI ---
       return () => {
         console.log("Cleaning up chat listener for user:", user.uid);
-        unsubscribe(); // Hanya unsubscribe listener
-        stopQueue();   // Dan hentikan audio
+        unsubscribe();
+        stopQueue();
       };
     }
   }, [user, initializeChat, stopQueue]);
 
-
-  // Logika untuk memutar audio secara otomatis (tidak berubah)
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
+
     if (
       lastMessage?.id &&
       lastMessage.id !== processedAudioMessageId &&
@@ -49,16 +48,13 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
       setProcessedAudioMessageId(lastMessage.id);
       startQueue(lastMessage.audioUrls);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // --- PERBAIKAN 2: Komentar eslint-disable dihapus dari sini ---
   }, [messages, startQueue, processedAudioMessageId]);
 
-
-  // Scroll otomatis
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isAiTyping]);
   
-  // Penyesuaian tinggi textarea
   useEffect(() => {
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -107,7 +103,6 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
           <div key={index} className={`flex mb-4 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-xs md:max-w-md lg:max-w-lg px-4 py-2 rounded-lg ${msg.sender === 'user' ? 'bg-[#A8FF00] text-black' : 'bg-gray-800 text-white'}`}>
               
-              {/* --- PERBAIKAN EFEK KETIK & TOMBOL PUTAR ULANG --- */}
               {msg.sender === 'ai' ? (
                 <>
                   <AiMessage text={msg.text} isStreaming={index === lastMessageIndex && isAiTyping && !isAudioPlaying} />
@@ -116,7 +111,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
                   )}
                 </>
               ) : (
-                <p>{msg.text}</p> // Pesan pengguna ditampilkan langsung tanpa efek
+                <p>{msg.text}</p>
               )}
 
             </div>
