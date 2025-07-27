@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
 import { Send, Mic, Square } from 'lucide-react';
 import AiMessage from './AiMessage';
+import AudioPlayer from './AudioPlayer'; // <-- Impor komponen baru
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useChatStore } from '@/stores/chatStore';
 import { useAudioQueue } from '@/hooks/useAudioQueue';
@@ -19,12 +20,28 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { isPlaying: isAudioPlaying, startQueue, stopQueue } = useAudioQueue();
-  
   const [processedAudioMessageId, setProcessedAudioMessageId] = useState<string | null>(null);
 
+  // --- PERBAIKAN BUG HALAMAN KOSONG ---
+  // Kita akan memastikan proses cleanup berjalan setiap kali user berubah atau komponen dilepas
+  useEffect(() => {
+    if (user) {
+      const unsubscribe = initializeChat(user.uid, user.displayName);
+      
+      // Fungsi cleanup ini akan dipanggil saat user logout atau pindah halaman
+      return () => {
+        console.log("Cleaning up chat listener for user:", user.uid);
+        unsubscribe();
+        reset();
+        stopQueue(); // Pastikan audio juga berhenti
+      };
+    }
+  }, [user, initializeChat, reset, stopQueue]);
+
+
+  // Logika untuk memutar audio secara otomatis (tidak berubah)
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
-
     if (
       lastMessage?.id &&
       lastMessage.id !== processedAudioMessageId &&
@@ -39,20 +56,12 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   }, [messages, startQueue, processedAudioMessageId]);
 
 
-  useEffect(() => {
-    if (user) {
-      const unsubscribe = initializeChat(user.uid, user.displayName);
-      return () => {
-        unsubscribe();
-        reset();
-      };
-    }
-  }, [user, initializeChat, reset]);
-
+  // Scroll otomatis
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isAiTyping]);
   
+  // Penyesuaian tinggi textarea
   useEffect(() => {
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -100,7 +109,19 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
         {messages.map((msg, index) => (
           <div key={index} className={`flex mb-4 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-xs md:max-w-md lg:max-w-lg px-4 py-2 rounded-lg ${msg.sender === 'user' ? 'bg-[#A8FF00] text-black' : 'bg-gray-800 text-white'}`}>
-              <AiMessage text={msg.text} isStreaming={index === lastMessageIndex && isAiTyping && !isAudioPlaying} />
+              
+              {/* --- PERBAIKAN EFEK KETIK & TOMBOL PUTAR ULANG --- */}
+              {msg.sender === 'ai' ? (
+                <>
+                  <AiMessage text={msg.text} isStreaming={index === lastMessageIndex && isAiTyping && !isAudioPlaying} />
+                  {msg.audioUrls && msg.audioUrls.length > 0 && (
+                    <AudioPlayer audioUrls={msg.audioUrls} />
+                  )}
+                </>
+              ) : (
+                <p>{msg.text}</p> // Pesan pengguna ditampilkan langsung tanpa efek
+              )}
+
             </div>
           </div>
         ))}
