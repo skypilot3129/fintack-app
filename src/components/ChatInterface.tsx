@@ -2,9 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
-import { Send, Mic, Square } from 'lucide-react';
+import { Send, Mic, Square, Play, Pause } from 'lucide-react';
 import AiMessage from './AiMessage';
-import AudioPlayer from './AudioPlayer';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useChatStore } from '@/stores/chatStore';
 import { useAudioQueue } from '@/hooks/useAudioQueue';
@@ -14,38 +13,53 @@ type ChatInterfaceProps = {
 };
 
 export default function ChatInterface({ user }: ChatInterfaceProps) {
-  const { messages, isAiTyping, initializeChat, sendMessage, reset, processedAudioMessageId, setProcessedAudioMessageId } = useChatStore();
+  const { messages, isAiTyping, initializeChat, sendMessage, reset } = useChatStore();
+  
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const { isPlaying: isAudioPlaying, startQueue, stopQueue } = useAudioQueue();
+  const { isPlaying, loadQueue, playQueue, stopQueue } = useAudioQueue();
   
+  const [loadedAudioMessageId, setLoadedAudioMessageId] = useState<string | null>(null);
+
+  // ==================================================================
+  // PERBAIKAN FINAL: Mengatasi Infinite Loop dengan Dependency Array yang Benar
+  // ==================================================================
   useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+
     if (user) {
-      const unsubscribe = initializeChat(user.uid, user.displayName);
-      return () => {
-        console.log("Cleaning up chat listener for user:", user.uid);
-        unsubscribe();
-      };
+      unsubscribe = initializeChat(user.uid, user.displayName);
     } else {
       reset();
     }
-  }, [user, initializeChat, reset]);
+
+    return () => {
+      if (unsubscribe) {
+        console.log("Cleaning up chat listener for user:", user?.uid);
+        unsubscribe();
+      }
+      stopQueue();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]); // <-- KUNCI PERBAIKAN: Dependency array HANYA berisi 'user'
+
 
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (
       lastMessage?.id &&
-      lastMessage.id !== processedAudioMessageId &&
+      lastMessage.id !== loadedAudioMessageId &&
       lastMessage.sender === 'ai' &&
       lastMessage.audioUrls &&
       lastMessage.audioUrls.length > 0
     ) {
-      setProcessedAudioMessageId(lastMessage.id);
-      startQueue(lastMessage.audioUrls);
+      console.log(`Loading audio for message ID: ${lastMessage.id}`);
+      loadQueue(lastMessage.audioUrls);
+      setLoadedAudioMessageId(lastMessage.id);
     }
-  }, [messages, startQueue, processedAudioMessageId, setProcessedAudioMessageId]);
+  }, [messages, loadQueue, loadedAudioMessageId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -88,12 +102,8 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
   const lastMessageIndex = messages.length - 1;
 
   const getPlaceholderText = () => {
-    if (isListening) {
-      return "Mendengarkan... bicaralah yang jelas.";
-    }
-    if (isAiTyping) {
-      return "Mas Eugene sedang mengetik...";
-    }
+    if (isListening) return "Mendengarkan... bicaralah yang jelas.";
+    if (isAiTyping) return "Mas Eugene sedang mengetik...";
     return "Ketik atau tekan mic untuk bicara...";
   };
 
@@ -110,9 +120,17 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
             <div className={`max-w-xs md:max-w-md lg:max-w-lg px-4 py-2 rounded-lg ${msg.sender === 'user' ? 'bg-[#A8FF00] text-black' : 'bg-gray-800 text-white'}`}>
               {msg.sender === 'ai' ? (
                 <>
-                  <AiMessage text={msg.text} isStreaming={index === lastMessageIndex && isAiTyping && !isAudioPlaying} />
+                  <AiMessage text={msg.text} isStreaming={index === lastMessageIndex && isAiTyping && !isPlaying} />
                   {msg.audioUrls && msg.audioUrls.length > 0 && (
-                    <AudioPlayer audioUrls={msg.audioUrls} />
+                     <div className="mt-2">
+                        <button 
+                            onClick={isPlaying ? stopQueue : playQueue}
+                            className="flex items-center gap-2 text-xs text-lime-300 bg-gray-700/50 px-3 py-1 rounded-full hover:bg-gray-700"
+                        >
+                            {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                            <span>{isPlaying ? 'Berhenti' : 'Putar Suara'}</span>
+                        </button>
+                    </div>
                   )}
                 </>
               ) : (
@@ -121,7 +139,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
             </div>
           </div>
         ))}
-        {isAiTyping && !isAudioPlaying && (
+        {isAiTyping && !isPlaying && (
           <div className="flex justify-start mb-4">
             <div className="bg-gray-800 text-white px-4 py-2 rounded-lg">
               <p className="text-sm animate-pulse">Mas Eugene sedang berpikir...</p>
@@ -144,7 +162,7 @@ export default function ChatInterface({ user }: ChatInterfaceProps) {
             disabled={isAiTyping || isListening}
           />
           
-          {isAudioPlaying ? (
+          {isPlaying ? (
             <button type="button" onClick={stopQueue} className="bg-red-500 text-white rounded-full p-3 flex-shrink-0" title="Hentikan Suara">
               <Square size={18} />
             </button>
