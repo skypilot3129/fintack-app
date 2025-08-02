@@ -4,8 +4,6 @@
 
 import BottomNav from '@/components/BottomNav';
 import { Toaster } from 'react-hot-toast';
-import { AnimatePresence, motion } from 'framer-motion';
-import { usePathname } from 'next/navigation';
 import { TourContextProvider } from '@/context/TourContext';
 import { AuthContextProvider } from '@/context/AuthContext';
 import AppGate from '@/components/AppGate';
@@ -15,16 +13,13 @@ export default function MainLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-
   return (
     <AuthContextProvider>
       <TourContextProvider>
         {/* AppGate akan menangani Preloader & Onboarding */}
         <AppGate />
 
-        {/* DIUBAH: Hapus `h-screen`, `flex`, dan `overflow-hidden` dari sini */}
-        <div className="bg-[#0A0A0A] text-white">
+        <div className="bg-[#0A0A0A] text-white min-h-screen">
           <Toaster 
             position="top-center"
             toastOptions={{
@@ -35,25 +30,15 @@ export default function MainLayout({
             }}
           />
           
-          <AnimatePresence mode="wait">
-            {/* DIUBAH: Hapus semua class styling dari motion.div.
-              Biarkan komponen ini hanya fokus pada animasi.
-              Layout akan ditangani oleh setiap halaman.
-            */}
-            <motion.div
-              key={pathname}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              {children}
-            </motion.div>
-          </AnimatePresence>
-          
-          {/* BottomNav sekarang menjadi komponen yang "melayang" di atas konten.
-            Konten halaman akan diberi padding bawah agar tidak tertutup.
+          {/* PERBAIKAN: 
+            Komponen <AnimatePresence> dan <motion.div> dihapus dari sini. 
+            Ini adalah penyebab utama mengapa state pada halaman Mentor (dan mungkin halaman lain) 
+            hilang saat navigasi. Dengan menghapusnya, kita memastikan komponen halaman 
+            tidak di-unmount secara paksa selama transisi, sehingga menjaga koneksi data 
+            dan state internalnya tetap hidup.
           */}
+          {children}
+          
           <BottomNav />
         </div>
       </TourContextProvider>

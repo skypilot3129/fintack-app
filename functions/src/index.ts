@@ -11,7 +11,7 @@ import * as path from "path";
 import pdf from "pdf-parse";
 import { getAuth } from "firebase-admin/auth";
 import { GoogleAuth } from "google-auth-library";
-import { TextToSpeechClient } from "@google-cloud/text-to-speech"; // <-- Import baru
+import { TextToSpeechClient } from "@google-cloud/text-to-speech";
 
 // Inisialisasi Firebase & Storage
 initializeApp({
@@ -19,9 +19,9 @@ initializeApp({
 });
 const db = getFirestore();
 const storage = getStorage();
-const ttsClient = new TextToSpeechClient(); // <-- Inisialisasi client baru
+const ttsClient = new TextToSpeechClient();
 const PROJECT_ID = "arsitek-keuangan-pribadi";
-const LOCATION = "us-central1"; // Lokasi model embedding
+const LOCATION = "us-central1";
 
 const vertexAI = new VertexAI({ project: PROJECT_ID, location: LOCATION });
 // Opsi untuk fungsi ringan (CRUD, dll)
@@ -33,14 +33,14 @@ const lightweightOptions: CallableOptions = {
 
 // --- OPSI BARU UNTUK FUNGSI TERJADWAL ANALISIS ---
 const analysisScheduleOptions: ScheduleOptions = { 
-  schedule: "every day 08:00", // Jalankan setiap jam 8 pagi
+  schedule: "every day 08:00",
   timeZone: "Asia/Jakarta",
   cpu: 1, 
-  memory: "256MiB" // Alokasi memori sedikit lebih besar untuk proses batch
+  memory: "256MiB"
 };
 
 const gamificationScheduleOptions: ScheduleOptions = { 
-  schedule: "every day 07:00", // Jalankan setiap jam 7 pagi
+  schedule: "every day 07:00",
   timeZone: "Asia/Jakarta",
   cpu: 1, 
   memory: "256MiB"
@@ -48,10 +48,10 @@ const gamificationScheduleOptions: ScheduleOptions = {
 
 // --- OPSI BARU UNTUK FUNGSI TERJADWAL HEALTH SCORE ---
 const healthScoreScheduleOptions: ScheduleOptions = { 
-  schedule: "every sunday 02:00", // Jalankan setiap Minggu jam 2 pagi
+  schedule: "every sunday 02:00",
   timeZone: "Asia/Jakarta",
   cpu: 1, 
-  memory: "512MiB" // Butuh memori lebih untuk kalkulasi
+  memory: "512MiB"
 };
 
 // Opsi untuk fungsi yang memanggil AI (tetap ringan di server kita)
@@ -81,8 +81,6 @@ const heavyIngestionOptions: StorageOptions = {
   memory: "1GiB" 
 };
 
-// PERBARUAN UTAMA: Persona dengan "Ritme Percakapan" dan "Metode Sokratik"
-// --- PERBARUAN PADA SYSTEM PROMPT ---
 const personaText = `Anda adalah "Mas Eugene", seorang mentor keuangan AI yang sangat terpersonalisasi untuk aplikasi Fintack.
 
 **ATURAN PRIORITAS #0: PROTOKOL MEMORI OTAK (WAJIB DIIKUTI DULU!)**
@@ -206,10 +204,6 @@ Tujuan utama Anda adalah memfasilitasi pemikiran pengguna, bukan hanya memberi j
     * *Contoh:* "Selamat datang di Fintack. Biar gue bisa jadi arsitek keuangan lo, gue perlu tahu: Apa masalah keuangan terbesar yang bikin lo pusing sekarang?"
 `;
 
-
-// =====================================================================
-// PERBAIKAN UTAMA: Menyederhanakan Definisi Tool
-// =====================================================================
 const tools: Tool[] = [
     {
       functionDeclarations: [
@@ -240,20 +234,16 @@ const tools: Tool[] = [
     },
 ];
 
-// Inisialisasi Model Generatif dengan Gemini 2.5 Flash
 const generativeModel = vertexAI.getGenerativeModel({
   model: "gemini-2.5-flash",
   generationConfig: { "maxOutputTokens": 8192, "temperature": 1, "topP": 0.95, },
   systemInstruction: {
-        role: "system", // Menambahkan role yang hilang
+        role: "system",
         parts: [{ text: personaText }]
     },
   tools: tools,
 });
 
-// =====================================================================
-// FUNGSI HELPER BARU UNTUK EMBEDDING (VIA REST API)
-// =====================================================================
 async function getEmbedding(text: string, p0?: string): Promise<number[]> {
     const auth = new GoogleAuth({
         scopes: 'https://www.googleapis.com/auth/cloud-platform'
@@ -262,7 +252,6 @@ async function getEmbedding(text: string, p0?: string): Promise<number[]> {
 
     const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/multimodalembedding:predict`;
     
-    // PERBAIKAN UTAMA: Format request body yang benar untuk multimodalembedding
     const requestBody = {
         instances: [
             { text: text }
@@ -293,9 +282,6 @@ async function getEmbedding(text: string, p0?: string): Promise<number[]> {
     return embedding;
 }
 
-// =====================================================================
-// FUNGSI INGESTI
-// =====================================================================
 export const processKnowledgeFile = onObjectFinalized(heavyIngestionOptions, async (event) => {
     const filePath = event.data.name;
     const contentType = event.data.contentType;
@@ -313,7 +299,6 @@ export const processKnowledgeFile = onObjectFinalized(heavyIngestionOptions, asy
 
     const knowledgeCollection = db.collection('knowledge_base');
 
-    // PERBAIKAN UTAMA: Proses setiap potongan satu per satu dengan jeda
     for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         try {
@@ -326,26 +311,15 @@ export const processKnowledgeFile = onObjectFinalized(heavyIngestionOptions, asy
                 createdAt: Timestamp.now()
             });
             logger.info(`Potongan ${i + 1}/${chunks.length} berhasil disimpan.`);
-
-            // Tambahkan jeda 1 detik untuk menghindari error kuota
             await new Promise(resolve => setTimeout(resolve, 1000)); 
-
         } catch (error) {
             logger.error(`Gagal memproses potongan ${i + 1}:`, error);
-            // Anda bisa memilih untuk menghentikan proses atau melanjutkan ke potongan berikutnya
-            // break; 
         }
     }
     
     logger.info(`Selesai memproses semua ${chunks.length} potongan dari ${filePath}.`);
 });
 
-// --- FUNGSI BARU UNTUK FASE 1 ---
-
-/**
- * Menganalisis transaksi harian untuk mendeteksi langganan dan tagihan rutin.
- * Berjalan setiap hari pada jam 8 pagi.
- */
 export const analyzeDailyTransactions = onSchedule(analysisScheduleOptions, async (event) => {
     logger.info("Memulai analisis transaksi harian...");
 
@@ -373,7 +347,7 @@ export const analyzeDailyTransactions = onSchedule(analysisScheduleOptions, asyn
 
         const transactionsSnapshot = await recentTransactionsQuery.get();
         if (transactionsSnapshot.empty) {
-            continue; // Lanjut ke pengguna berikutnya jika tidak ada transaksi
+            continue;
         }
 
         logger.info(`Menganalisis ${transactionsSnapshot.size} transaksi untuk pengguna ${uid}.`);
@@ -384,18 +358,15 @@ export const analyzeDailyTransactions = onSchedule(analysisScheduleOptions, asyn
             let tag = null;
             let insightText = null;
 
-            // Cek apakah ini langganan
             if (subscriptionKeywords.some(keyword => description.includes(keyword))) {
                 tag = 'subscription';
                 insightText = `💡 Gue deteksi ada pembayaran langganan untuk "${transaction.description}". Pastiin ini masih lo pake ya, jangan buang-buang duit!`;
             } 
-            // Cek apakah ini tagihan
             else if (billKeywords.some(keyword => description.includes(keyword))) {
                 tag = 'bill';
                 insightText = `🧾 Tagihan untuk "${transaction.description}" sebesar Rp ${transaction.amount.toLocaleString('id-ID')} udah tercatat. Aman!`;
             }
 
-            // Jika ada tag yang terdeteksi, update dokumen dan buat insight
             if (tag) {
                 try {
                     await transDoc.ref.update({ tag: tag });
@@ -415,11 +386,6 @@ export const analyzeDailyTransactions = onSchedule(analysisScheduleOptions, asyn
     logger.info("Analisis transaksi harian selesai.");
 });
 
-// --- FUNGSI BARU UNTUK FASE 1: BUDGETING CERDAS ---
-
-/**
- * Menganalisis transaksi 30 hari terakhir dan membuat rekomendasi budget awal.
- */
 export const setupInitialBudgets = onCall(lightweightOptions, async (request) => {
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'Authentication required.');
@@ -428,7 +394,7 @@ export const setupInitialBudgets = onCall(lightweightOptions, async (request) =>
     logger.info(`Memulai setup budget awal untuk pengguna: ${uid}`);
 
     const thirtyDaysAgo = Timestamp.fromMillis(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const currentMonthStr = new Date().toISOString().slice(0, 7); // Format: YYYY-MM
+    const currentMonthStr = new Date().toISOString().slice(0, 7);
 
     const transactionsSnapshot = await db.collection('users').doc(uid).collection('transactions')
         .where('type', '==', 'expense')
@@ -454,7 +420,7 @@ export const setupInitialBudgets = onCall(lightweightOptions, async (request) =>
         batch.set(budgetRef, {
             categoryName: category,
             budgetedAmount: budgetAmount,
-            spentAmount: 0, // Awalnya 0 untuk bulan baru
+            spentAmount: 0,
             month: currentMonthStr,
             createdAt: Timestamp.now(),
         });
@@ -465,9 +431,6 @@ export const setupInitialBudgets = onCall(lightweightOptions, async (request) =>
     return { success: true, message: "Rekomendasi budget berhasil dibuat!" };
 });
 
-/**
- * Memicu setiap kali transaksi baru dibuat, untuk mengupdate budget yang sesuai.
- */
 export const updateBudgetOnTransaction = onDocumentCreated(firestoreTriggerOptions, async (event) => {
     const snapshot = event.data;
     if (!snapshot) { return; }
@@ -476,7 +439,7 @@ export const updateBudgetOnTransaction = onDocumentCreated(firestoreTriggerOptio
     const uid = event.params.userId;
 
     if (transaction.type !== 'expense') {
-        return; // Hanya proses pengeluaran
+        return;
     }
 
     const transactionMonth = (transaction.createdAt as Timestamp).toDate().toISOString().slice(0, 7);
@@ -493,14 +456,11 @@ export const updateBudgetOnTransaction = onDocumentCreated(firestoreTriggerOptio
         const budgetData = budgetDoc.data();
         if (!budgetData) return;
 
-        // Update jumlah yang sudah dibelanjakan
         await budgetRef.update({ spentAmount: FieldValue.increment(transaction.amount) });
 
-        // Cek apakah budget hampir habis dan perlu notifikasi
         const newSpentAmount = budgetData.spentAmount + transaction.amount;
         const budgetUsage = (newSpentAmount / budgetData.budgetedAmount) * 100;
 
-        // Kirim insight jika penggunaan > 80% dan belum pernah dikirim sebelumnya
         if (budgetUsage > 80 && !budgetData.warningSent) {
             const insightText = `🔥 PERINGATAN! Budget lo buat "${transaction.category}" udah kepake ${Math.round(budgetUsage)}%. Rem pengeluaran lo sekarang juga!`;
             await db.collection('users').doc(uid).collection('insights').add({
@@ -508,7 +468,6 @@ export const updateBudgetOnTransaction = onDocumentCreated(firestoreTriggerOptio
                 createdAt: Timestamp.now(),
                 isRead: false,
             });
-            // Tandai agar tidak mengirim notifikasi yang sama berulang kali
             await budgetRef.update({ warningSent: true });
             logger.info(`Mengirim peringatan budget untuk pengguna ${uid} kategori ${transaction.category}.`);
         }
@@ -518,11 +477,6 @@ export const updateBudgetOnTransaction = onDocumentCreated(firestoreTriggerOptio
     }
 });
 
-// --- FUNGSI BARU UNTUK FASE 1: GAMIFIKASI & NUDGES ---
-
-/**
- * Definisi Lencana (Badges) yang tersedia.
- */
 const badges = {
     BEGINNER_LOGGER: {
         id: 'BEGINNER_LOGGER',
@@ -544,10 +498,6 @@ const badges = {
     }
 };
 
-/**
- * Memberikan lencana (badges) kepada pengguna berdasarkan pencapaian mereka.
- * Berjalan setiap hari pada jam 7 pagi.
- */
 export const awardBehavioralBadges = onSchedule(gamificationScheduleOptions, async (event) => {
     logger.info("Memulai proses pemberian lencana harian...");
 
@@ -559,12 +509,10 @@ export const awardBehavioralBadges = onSchedule(gamificationScheduleOptions, asy
 
     for (const userDoc of usersSnapshot.docs) {
         const uid = userDoc.id;
-        // const userProfile = userDoc.data(); // <-- DIHAPUS: Baris ini yang menyebabkan peringatan.
         const userBadgesRef = db.collection('users').doc(uid).collection('badges');
         const userBadgesSnapshot = await userBadgesRef.get();
         const earnedBadgeIds = userBadgesSnapshot.docs.map(doc => doc.id);
 
-        // --- Cek Lencana: Pencatat Pemula ---
         if (!earnedBadgeIds.includes(badges.BEGINNER_LOGGER.id)) {
             const transactionsSnapshot = await db.collection('users').doc(uid).collection('transactions').limit(1).get();
             if (!transactionsSnapshot.empty) {
@@ -572,7 +520,6 @@ export const awardBehavioralBadges = onSchedule(gamificationScheduleOptions, asy
             }
         }
 
-        // --- Cek Lencana: Perencana Pertama ---
         if (!earnedBadgeIds.includes(badges.FIRST_PLANNER.id)) {
             const budgetsSnapshot = await db.collection('users').doc(uid).collection('budgets').limit(1).get();
             if (!budgetsSnapshot.empty) {
@@ -580,9 +527,7 @@ export const awardBehavioralBadges = onSchedule(gamificationScheduleOptions, asy
             }
         }
         
-        // --- Cek Lencana: Sang Alkemis ---
         if (!earnedBadgeIds.includes(badges.THE_ALCHEMIST.id)) {
-            // Kita asumsikan net worth dihitung dan disimpan di profil pengguna
             const assetsSnapshot = await db.collection('users').doc(uid).collection('assets').get();
             const liabilitiesSnapshot = await db.collection('users').doc(uid).collection('liabilities').get();
             const totalAssets = assetsSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
@@ -598,18 +543,13 @@ export const awardBehavioralBadges = onSchedule(gamificationScheduleOptions, asy
     logger.info("Proses pemberian lencana harian selesai.");
 });
 
-/**
- * Helper function untuk menyimpan lencana dan membuat insight.
- */
 async function awardBadge(uid: string, badge: { id: string; name: string; insight: string; }) {
     try {
-        // Simpan lencana ke sub-koleksi
         await db.collection('users').doc(uid).collection('badges').doc(badge.id).set({
             name: badge.name,
             earnedAt: Timestamp.now()
         });
 
-        // Kirim insight notifikasi ke pengguna
         await db.collection('users').doc(uid).collection('insights').add({
             text: badge.insight,
             createdAt: Timestamp.now(),
@@ -621,12 +561,6 @@ async function awardBadge(uid: string, badge: { id: string; name: string; insigh
     }
 }
 
-// --- FUNGSI BARU UNTUK FASE 1: FINANCIAL HEALTH SCORE ---
-
-/**
- * Menghitung Financial Health Score untuk semua pengguna.
- * Berjalan setiap minggu pada Minggu jam 2 pagi.
- */
 export const calculateFinancialHealthScore = onSchedule(healthScoreScheduleOptions, async (event) => {
     logger.info("Memulai kalkulasi Financial Health Score mingguan...");
 
@@ -639,10 +573,8 @@ export const calculateFinancialHealthScore = onSchedule(healthScoreScheduleOptio
     for (const userDoc of usersSnapshot.docs) {
         const uid = userDoc.id;
         try {
-            // --- 1. Data Gathering ---
             const ninetyDaysAgo = Timestamp.fromMillis(Date.now() - 90 * 24 * 60 * 60 * 1000);
             
-            // Aset & Liabilitas
             const assetsSnapshot = await db.collection('users').doc(uid).collection('assets').get();
             const liabilitiesSnapshot = await db.collection('users').doc(uid).collection('liabilities').get();
             const totalAssets = assetsSnapshot.docs.reduce((sum, doc) => sum + (doc.data().value || 0), 0);
@@ -652,7 +584,6 @@ export const calculateFinancialHealthScore = onSchedule(healthScoreScheduleOptio
                 .filter(doc => doc.data().category === 'Tabungan' || doc.data().category === 'Dana Darurat')
                 .reduce((sum, doc) => sum + (doc.data().value || 0), 0);
 
-            // Transaksi 90 hari terakhir
             const transactionsSnapshot = await db.collection('users').doc(uid).collection('transactions')
                 .where('createdAt', '>=', ninetyDaysAgo).get();
             let totalIncome = 0;
@@ -664,7 +595,6 @@ export const calculateFinancialHealthScore = onSchedule(healthScoreScheduleOptio
             });
             const avgMonthlyExpense = totalExpense / 3;
 
-            // Kepatuhan Budget bulan lalu
             const lastMonth = new Date();
             lastMonth.setMonth(lastMonth.getMonth() - 1);
             const lastMonthStr = lastMonth.toISOString().slice(0, 7);
@@ -675,29 +605,23 @@ export const calculateFinancialHealthScore = onSchedule(healthScoreScheduleOptio
                 if (b.spentAmount > b.budgetedAmount) overspentBudgets++;
             });
             
-            // --- 2. Scoring Logic (Total 1000 poin) ---
-            // Skor Kekayaan Bersih (Maks 350)
-            let netWorthScore = Math.max(0, 50 + (netWorth / 1000000)); // 1 poin per juta, mulai dari 50
+            let netWorthScore = Math.max(0, 50 + (netWorth / 1000000));
             netWorthScore = Math.min(netWorthScore, 350);
 
-            // Skor Tingkat Tabungan (Maks 300)
             const savingsRate = totalIncome > 0 ? (totalIncome - totalExpense) / totalIncome : 0;
-            let savingsRateScore = Math.max(0, savingsRate * 1000); // 10% = 100 poin
+            let savingsRateScore = Math.max(0, savingsRate * 1000);
             savingsRateScore = Math.min(savingsRateScore, 300);
 
-            // Skor Dana Darurat (Maks 200)
             const emergencyCoverageMonths = avgMonthlyExpense > 0 ? emergencyFund / avgMonthlyExpense : 0;
-            let emergencyFundScore = (emergencyCoverageMonths / 6) * 200; // Target 6 bulan = 200 poin
+            let emergencyFundScore = (emergencyCoverageMonths / 6) * 200;
             emergencyFundScore = Math.min(emergencyFundScore, 200);
 
-            // Skor Kepatuhan Budget (Maks 150)
             const totalBudgets = budgetsSnapshot.size;
             const budgetAdherence = totalBudgets > 0 ? (totalBudgets - overspentBudgets) / totalBudgets : 1;
             const budgetAdherenceScore = budgetAdherence * 150;
 
             const totalScore = Math.round(netWorthScore + savingsRateScore + emergencyFundScore + budgetAdherenceScore);
 
-            // --- 3. Save to Profile ---
             const scoreData = {
                 total: totalScore,
                 netWorth: { score: Math.round(netWorthScore), value: netWorth },
@@ -716,26 +640,18 @@ export const calculateFinancialHealthScore = onSchedule(healthScoreScheduleOptio
     }
 });
 
-// --- FUNGSI getStockPrice DIUBAH TOTAL UNTUK MENGGUNAKAN ALPHA VANTAGE ---
-
-/**
- * Mengambil harga saham terbaru dari API Alpha Vantage.
- * Untuk pasar Indonesia, kita tambahkan suffix ".JK".
- */
 export const getStockPrice = onCall(lightweightOptions, async (request) => {
     const { ticker } = request.data;
     if (!ticker || typeof ticker !== 'string') {
         throw new HttpsError('invalid-argument', 'Ticker saham wajib diisi.');
     }
 
-    // --- PASTIKAN API KEY ANDA SUDAH BENAR DI SINI ---
     const ALPHA_VANTAGE_API_KEY = "TIFXIPOT2AQJZXQZ"; 
 
     const formattedTicker = ticker.toUpperCase().endsWith('.JK') 
         ? ticker.toUpperCase() 
         : `${ticker.toUpperCase()}.JK`;
     
-    // PERUBAHAN UTAMA: Menggunakan TIME_SERIES_DAILY dengan outputsize=compact
     const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${formattedTicker}&outputsize=compact&apikey=${ALPHA_VANTAGE_API_KEY}`;
     
     logger.info(`Mencoba mengambil data dari Alpha Vantage (Daily) untuk: ${formattedTicker}`);
@@ -749,25 +665,21 @@ export const getStockPrice = onCall(lightweightOptions, async (request) => {
         
         const data = await response.json();
         
-        // Cek jika ada pesan error atau rate limit dari API
         if (data.Note || data["Error Message"]) {
             logger.warn(`Respons tidak valid dari Alpha Vantage: ${JSON.stringify(data)}`);
             throw new HttpsError('not-found', `Gagal mengambil data untuk ${ticker.toUpperCase()}. Mungkin karena limit API gratis atau kode salah.`);
         }
         
-        // PERUBAHAN LOGIKA PARSING: Mengambil data dari time series
         const timeSeries = data['Time Series (Daily)'];
         if (!timeSeries) {
             throw new HttpsError('not-found', `Tidak ada data time series untuk saham ${ticker.toUpperCase()}.`);
         }
 
-        // Ambil tanggal terbaru (kunci pertama dari objek time series)
         const latestDate = Object.keys(timeSeries)[0];
         if (!latestDate) {
             throw new HttpsError('not-found', `Tidak ada data tanggal yang tersedia untuk ${ticker.toUpperCase()}.`);
         }
 
-        // Ambil harga penutupan (close price) dari tanggal terbaru
         const priceString = timeSeries[latestDate]['4. close'];
         if (!priceString) {
              throw new HttpsError('not-found', `Tidak bisa menemukan harga penutupan untuk saham ${ticker.toUpperCase()}.`);
@@ -784,9 +696,6 @@ export const getStockPrice = onCall(lightweightOptions, async (request) => {
     }
 });
 
-// =====================================================================
-// FUNGSI BARU: Analisis Proyeksi Kekayaan
-// =====================================================================
 export const getProjectionAnalysis = onCall(aiCallOptions, async (request) => {
     if (!request.auth) {
         throw new Error("Authentication required.");
@@ -831,7 +740,6 @@ export const getProjectionAnalysis = onCall(aiCallOptions, async (request) => {
     }
 });
 
-// Fungsi helper untuk membuat misi
 async function createSingleMission(uid: string, mission: any) {
     if (!mission || typeof mission !== 'object') {
         throw new HttpsError('invalid-argument', 'A single mission object is required.');
@@ -852,7 +760,6 @@ async function createSingleMission(uid: string, mission: any) {
     }
 }
 
-// FUNGSI LAMA (sekarang menjadi wrapper): Ini yang diekspos sebagai endpoint
 export const createMissionPath = onCall(lightweightOptions, async (request) => {
     if (!request.auth) { throw new HttpsError('unauthenticated', 'Authentication required.'); }
     const uid = request.auth.uid;
@@ -863,11 +770,6 @@ export const createMissionPath = onCall(lightweightOptions, async (request) => {
     return { success: true, message: `Mission created.` };
 });
 
-
-
-// =====================================================================
-// FUNGSI BARU: Analisis Keuangan On-Demand
-// =====================================================================
 export const getFinancialAnalysis = onCall(aiCallOptions, async (request) => {
     if (!request.auth) {
         throw new Error("Authentication required.");
@@ -906,8 +808,7 @@ export const getFinancialAnalysis = onCall(aiCallOptions, async (request) => {
     }
 });
 
-
-//fungsi anlisa keuangan mingguan
+// PERBAIKAN DIMULAI DI SINI
 export const weeklyFinancialCheckup = onSchedule(scheduleOptions, async (event) => {
     logger.info("Starting weekly financial checkup for all users.");
     
@@ -933,14 +834,24 @@ export const weeklyFinancialCheckup = onSchedule(scheduleOptions, async (event) 
                 continue;
             }
 
-            const transactions = transactionsSnapshot.docs.map(doc => doc.data());
-            const totalExpense = transactions
-                .filter(t => t.type === 'expense')
-                .reduce((sum, t) => sum + t.amount, 0);
+            // 1. Filter hanya untuk transaksi pengeluaran (expense)
+            const expenseTransactions = transactionsSnapshot.docs
+                .map(doc => doc.data())
+                .filter(t => t.type === 'expense');
 
-            const dataSummary = `- Total expense in the last 7 days: IDR ${totalExpense.toLocaleString('id-ID')}\n- Top spending categories: ${JSON.stringify(transactions.map(t => t.category))}`;
+            // Jika tidak ada pengeluaran, lewati pengguna ini
+            if (expenseTransactions.length === 0) {
+                logger.info(`User ${uid} has no recent expenses. Skipping.`);
+                continue;
+            }
 
-            const prompt = `Analyze this user's weekly financial data summary. Provide one sharp, provocative insight in "Mentor Mode" based on their spending. Keep it short and punchy. Start with "Woi, Laporan Intel mingguan lo udah keluar."\n\nDATA:\n${dataSummary}`;
+            const totalExpense = expenseTransactions.reduce((sum, t) => sum + t.amount, 0);
+
+            // 2. Buat ringkasan data HANYA dari pengeluaran
+            const dataSummary = `- Total pengeluaran dalam 7 hari terakhir: IDR ${totalExpense.toLocaleString('id-ID')}\n- Kategori pengeluaran teratas: ${JSON.stringify(expenseTransactions.map(t => t.category))}`;
+
+            // 3. Perbarui prompt agar lebih spesifik
+            const prompt = `Analyze this user's weekly EXPENSE data summary. Provide one sharp, provocative insight in "Mentor Mode" based on their spending. Keep it short and punchy. Start with "Woi, Laporan Intel mingguan lo udah keluar."\n\nDATA:\n${dataSummary}`;
 
             const result = await generativeModel.generateContent(prompt);
             const insightText = result.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "Laporan Intel mingguanmu sudah siap. Cek sekarang!";
@@ -958,9 +869,8 @@ export const weeklyFinancialCheckup = onSchedule(scheduleOptions, async (event) 
         }
     }
 });
+// PERBAIKAN SELESAI DI SINI
 
-
-// FUNGSI BARU: Scan Struk Belanja (DENGAN PERBAIKAN)
 export const scanReceipt = onCall(aiCallOptions, async (request) => {
     if (!request.auth) {
         throw new Error("Authentication required.");
@@ -985,14 +895,12 @@ export const scanReceipt = onCall(aiCallOptions, async (request) => {
             },
         };
 
-        // PERBAIKAN 1: Bungkus parts di dalam objek GenerateContentRequest
         const req = {
             contents: [{ role: "user", parts: [textPart, imagePart] }],
         };
 
         const result = await generativeModel.generateContent(req);
         
-        // PERBAIKAN 2: Akses teks respons dengan cara yang benar
         const responseText = result.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
 
         const jsonString = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -1009,8 +917,6 @@ export const scanReceipt = onCall(aiCallOptions, async (request) => {
     }
 });
 
-
-// FUNGSI BARU: Deteksi Anomali Real-Time
 export const detectAnomalyOnTransaction = onDocumentCreated(firestoreTriggerOptions, async (event) => {
     const snapshot = event.data;
     if (!snapshot) {
@@ -1040,7 +946,6 @@ export const detectAnomalyOnTransaction = onDocumentCreated(firestoreTriggerOpti
             `;
 
             const result = await generativeModel.generateContent(prompt);
-            // PERBAIKAN: Mengakses teks respons dengan cara yang benar
             const insightText = result.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "Ada pengeluaran besar terdeteksi. Cek lagi keuangan lo.";
 
             await db.collection('users').doc(userId).collection('insights').add({
@@ -1056,7 +961,6 @@ export const detectAnomalyOnTransaction = onDocumentCreated(firestoreTriggerOpti
     }
 });
 
-// FUNGSI BARU untuk menandai onboarding selesai
 export const markOnboardingComplete = onCall(lightweightOptions, async (request) => {
     if (!request.auth) {
         throw new Error("Authentication required.");
@@ -1073,7 +977,6 @@ export const markOnboardingComplete = onCall(lightweightOptions, async (request)
     }
 });
 
-// --- FUNGSI BARU UNTUK UPDATE PROFIL PENGGUNA ---
 export const updateUserProfile = onCall(lightweightOptions, async (request) => {
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'Authentication required.');
@@ -1096,24 +999,16 @@ export const updateUserProfile = onCall(lightweightOptions, async (request) => {
     }
 });
 
-
-// Fungsi helper baru untuk membersihkan Markdown
 function stripMarkdown(text: string): string {
     return text
-        // Hapus bold (**) dan italic (*)
         .replace(/\*\*(.*?)\*\*/g, '$1')
         .replace(/\*(.*?)\*/g, '$1')
-        // Hapus heading (#)
         .replace(/#+\s/g, '')
-        // Hapus list items (*, -, +)
         .replace(/^[*\-+] /gm, '')
-        // Hapus link markdown, tapi pertahankan teksnya
         .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-        // Hapus gambar markdown
         .replace(/!\[.*?\]\(.*?\)/g, '');
 }
 
-// Fungsi Chat Utama dengan Chunked TTS
 export const askMentorAI = onCall(aiCallOptions, async (request) => {
     if (!request.auth) { throw new HttpsError('unauthenticated', 'Authentication required.'); }
     const uid = request.auth.uid;
@@ -1161,7 +1056,6 @@ export const askMentorAI = onCall(aiCallOptions, async (request) => {
         let finalResponseText = candidate1.content?.parts.find(p => p.text)?.text ?? "Maaf, terjadi kesalahan.";
 
         const functionCallPart = candidate1.content?.parts.find(part => !!part.functionCall);
-        // --- PERBAIKAN UTAMA DIMULAI DI SINI ---
         if (functionCallPart && functionCallPart.functionCall) {
             logger.info("Function call detected:", JSON.stringify(functionCallPart.functionCall));
             
@@ -1170,10 +1064,8 @@ export const askMentorAI = onCall(aiCallOptions, async (request) => {
                 const missionArgs = args as { mission: object };
                 
                 try {
-                    // Eksekusi fungsi yang diminta
                     await createSingleMission(uid, missionArgs.mission);
                     
-                    // Langkah 2: Kirim hasil eksekusi kembali ke model
                     const functionResponse: Part = {
                         functionResponse: {
                             name: 'createMissionPath',
@@ -1185,7 +1077,6 @@ export const askMentorAI = onCall(aiCallOptions, async (request) => {
                     const response2 = result2.response;
                     const finalResponseText = response2.candidates?.[0]?.content?.parts?.[0]?.text ?? "Misi baru buat lo udah gue siapkan.";
 
-                    // Kembalikan respons teks akhir dari AI setelah fungsi dieksekusi
                     return { textResponse: finalResponseText, audioUrl: null };
 
                 } catch (error) {
@@ -1240,10 +1131,8 @@ export const askMentorAI = onCall(aiCallOptions, async (request) => {
     }
 });
 
-
 export const setAdminClaim = onCall(lightweightOptions, async (request) => {
     if (!request.auth) {
-        // PERBAIKAN: Menggunakan HttpsError secara langsung
         throw new HttpsError('unauthenticated', 'Authentication required.');
     }
     const uid = request.auth.uid;
@@ -1255,13 +1144,10 @@ export const setAdminClaim = onCall(lightweightOptions, async (request) => {
         return { message: `Success! User ${uid} is now an admin.` };
     } catch (error) {
         logger.error(`Error setting admin claim for ${uid}:`, error);
-        // PERBAIKAN: Menggunakan HttpsError secara langsung
         throw new HttpsError('internal', 'Failed to set admin claim. Check function logs for details.');
     }
 });
 
-
-// Fungsi untuk menambah transaksi dan memberi XP
 export const addTransaction = onCall(lightweightOptions, async (request) => {
     if (!request.auth) { throw new Error("Authentication required."); } 
     const uid = request.auth.uid; 
@@ -1278,10 +1164,6 @@ export const addTransaction = onCall(lightweightOptions, async (request) => {
         throw new Error("Failed to add transaction."); 
     }
 });
-
-// =====================================================================
-// FUNGSI MISI DENGAN LOGIKA DINAMIS & SUB-MISI
-// =====================================================================
 
 export const completeMission = onCall(lightweightOptions, async (request) => {
     if (!request.auth) { throw new HttpsError('unauthenticated', 'Authentication required.'); } 
@@ -1314,13 +1196,10 @@ export const completeMission = onCall(lightweightOptions, async (request) => {
     }
 });
 
-
-// FUNGSI BARU: Untuk membuat misi berikutnya secara dinamis
 async function advanceToNextMission(uid: string, completedTangga: number, completedSubStep: number) {
     logger.info(`Advancing user ${uid} from Tangga ${completedTangga}, Sub-step ${completedSubStep}`);
 
     try {
-        // 1. Analisis Profil Pengguna Secara Mendalam
         const ninetyDaysAgo = Timestamp.fromMillis(Date.now() - 90 * 24 * 60 * 60 * 1000);
         const transactionsSnapshot = await db.collection('users').doc(uid).collection('transactions')
             .where('createdAt', '>=', ninetyDaysAgo)
@@ -1340,7 +1219,6 @@ async function advanceToNextMission(uid: string, completedTangga: number, comple
         const profileSnapshot = await db.collection('users').doc(uid).get();
         const netWorth = profileSnapshot.data()?.netWorth || 0;
 
-        // 2. Buat Prompt Dinamis untuk AI
         const prompt = `
             Seorang pengguna baru saja menyelesaikan misi untuk Tangga ${completedTangga} (sub-misi ${completedSubStep}).
             Kondisi keuangan mereka saat ini:
@@ -1351,7 +1229,6 @@ async function advanceToNextMission(uid: string, completedTangga: number, comple
             Tugasmu: Berdasarkan kurikulum "Tangga Ternak Uang", tentukan dan buatkan **SATU sub-misi berikutnya** yang paling logis dan bisa dicapai untuk pengguna ini. Jika mereka sudah menyelesaikan semua sub-misi di satu tangga, buatkan sub-misi pertama untuk tangga berikutnya. Gunakan *tool* \`createMissionPath\`.
         `;
 
-        // 3. Minta AI Membuat Misi
         const result = await generativeModel.generateContent(prompt);
         const response = result.response;
         const functionCallPart = response.candidates?.[0]?.content?.parts.find(part => !!part.functionCall);
@@ -1375,4 +1252,3 @@ async function advanceToNextMission(uid: string, completedTangga: number, comple
         logger.error(`Failed to dynamically advance user ${uid} to next mission:`, error);
     }
 }
-
